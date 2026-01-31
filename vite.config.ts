@@ -8,7 +8,7 @@ export default defineConfig(({ mode }) => {
   return {
     // For local/Android: use './' for file-based loading
     // For GitHub Pages: use '/repo-name/'
-    base: '/chaturnga_AI/',
+    base: '/mobapp/',
     server: {
       port: 3000,
       host: '0.0.0.0',
