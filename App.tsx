@@ -303,23 +303,20 @@ export default function App() {
         </div>
       </header>
 
-      {/* Game Info Bar */}
-      <div className="w-full max-w-2xl bg-[#1a1814] border border-[#b8860b] rounded-xl p-4 flex flex-col md:flex-row justify-between items-center gap-4 shadow-xl">
+      {/* Game Info Bar - Compact */}
+      <div className="w-full max-w-2xl bg-[#1a1814] border border-[#b8860b] rounded-lg px-4 py-3 flex flex-row justify-between items-center gap-2 shadow-xl">
         {/* Black Player */}
-        <div className={`flex items-center gap-3 w-full md:w-auto ${gameState.turn === 'black' ? 'opacity-100' : 'opacity-50'}`}>
-          <div className={`w-8 h-8 rounded-full border-2 ${gameState.turn === 'black' ? 'border-[#d4a574] shadow-[0_0_15px_rgba(212,165,116,0.5)]' : 'border-[#2d2a24]'} bg-[#1a1814] transition-all`} />
-          <div className="flex flex-col">
-            <span className="font-medium text-[#f5e6c8]">Black {gameMode === 'pvc' ? '(AI)' : ''}</span>
-            {renderCaptured(gameState.capturedWhite, 'white')}
-          </div>
+        <div className={`flex items-center gap-2 ${gameState.turn === 'black' ? 'opacity-100' : 'opacity-40'}`}>
+          <div className={`w-6 h-6 rounded-full border-2 ${gameState.turn === 'black' ? 'border-[#d4a574] shadow-[0_0_10px_rgba(212,165,116,0.5)]' : 'border-[#2d2a24]'} bg-[#1a1814] transition-all`} />
+          <span className="text-sm font-medium text-[#f5e6c8]">Black{gameMode === 'pvc' ? ' (AI)' : ''}</span>
         </div>
 
         {/* Undo/Redo Buttons */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
           <button
             onClick={undoMove}
             disabled={history.length === 0 || gameState.gameOver}
-            className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${history.length > 0 && !gameState.gameOver ? 'bg-[#b8860b] text-[#1a1814] hover:bg-[#d4a574]' : 'bg-[#2d2a24] text-[#b8860b]/30 cursor-not-allowed'}`}
+            className={`w-8 h-8 rounded-full flex items-center justify-center text-sm transition-all ${history.length > 0 && !gameState.gameOver ? 'bg-[#b8860b] text-[#1a1814] hover:bg-[#d4a574]' : 'bg-[#2d2a24] text-[#b8860b]/30 cursor-not-allowed'}`}
             title="Undo"
           >
             ↩
@@ -327,7 +324,7 @@ export default function App() {
           <button
             onClick={redoMove}
             disabled={future.length === 0 || gameState.gameOver}
-            className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${future.length > 0 && !gameState.gameOver ? 'bg-[#b8860b] text-[#1a1814] hover:bg-[#d4a574]' : 'bg-[#2d2a24] text-[#b8860b]/30 cursor-not-allowed'}`}
+            className={`w-8 h-8 rounded-full flex items-center justify-center text-sm transition-all ${future.length > 0 && !gameState.gameOver ? 'bg-[#b8860b] text-[#1a1814] hover:bg-[#d4a574]' : 'bg-[#2d2a24] text-[#b8860b]/30 cursor-not-allowed'}`}
             title="Redo"
           >
             ↪
@@ -335,12 +332,9 @@ export default function App() {
         </div>
 
         {/* White Player */}
-        <div className={`flex flex-row-reverse md:flex-row items-center gap-3 w-full md:w-auto text-right ${gameState.turn === 'white' ? 'opacity-100' : 'opacity-50'}`}>
-          <div className="flex flex-col items-end md:items-start">
-            <span className="font-medium text-[#f5e6c8]">White</span>
-            {renderCaptured(gameState.capturedBlack, 'black')}
-          </div>
-          <div className={`w-8 h-8 rounded-full border-2 ${gameState.turn === 'white' ? 'border-[#d4a574] shadow-[0_0_15px_rgba(212,165,116,0.5)]' : 'border-[#2d2a24]'} bg-[#f5e6c8] transition-all`} />
+        <div className={`flex items-center gap-2 ${gameState.turn === 'white' ? 'opacity-100' : 'opacity-40'}`}>
+          <span className="text-sm font-medium text-[#f5e6c8]">White</span>
+          <div className={`w-6 h-6 rounded-full border-2 ${gameState.turn === 'white' ? 'border-[#d4a574] shadow-[0_0_10px_rgba(212,165,116,0.5)]' : 'border-[#2d2a24]'} bg-[#f5e6c8] transition-all`} />
         </div>
       </div>
 
