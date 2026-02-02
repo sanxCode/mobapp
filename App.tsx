@@ -2,6 +2,15 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createInitialBoard, getLegalMoves, isKingInCheck, simulateMove, hasAnyLegalMoves } from './utils/engine';
 import { getBestMove } from './utils/ai';
 import { BOARD_SIZE, PIECE_SYMBOLS } from './utils/constants';
+
+// Helper to get base path for assets
+const getBasePath = () => import.meta.env.BASE_URL || '/';
+
+// Get piece image path
+const getPieceImage = (color: string, type: string) => {
+  const pieceName = `${color}_${type.toLowerCase()}`;
+  return `${getBasePath()}pieces/${pieceName}.png`;
+};
 import { BoardState, Color, GameState, Move, PieceType, Position } from './types';
 
 // Constants
@@ -84,7 +93,7 @@ export default function App() {
 
   const executeMove = (fromRow: number, fromCol: number, move: Move) => {
     const { board, turn, capturedWhite, capturedBlack } = gameState;
-    
+
     // Capture logic
     const capturedPiece = board[move.row][move.col];
     const newCapturedWhite = [...capturedWhite];
@@ -104,21 +113,21 @@ export default function App() {
       if (move.row === promotionRow) {
         // If AI, auto-promote to Queen
         if (gameMode === 'pvc' && turn === AI_COLOR) {
-             newBoard[move.row][move.col] = { ...movedPiece, type: PieceType.QUEEN };
-             finalizeTurn(newBoard, turn, newCapturedWhite, newCapturedBlack);
-             return;
+          newBoard[move.row][move.col] = { ...movedPiece, type: PieceType.QUEEN };
+          finalizeTurn(newBoard, turn, newCapturedWhite, newCapturedBlack);
+          return;
         } else {
-             // Show promotion dialog for Human
-             setGameState(prev => ({
-               ...prev,
-               board: newBoard,
-               capturedWhite: newCapturedWhite,
-               capturedBlack: newCapturedBlack,
-               promotionPending: { row: move.row, col: move.col, color: turn },
-               validMoves: [],
-               selectedSquare: null
-             }));
-             return;
+          // Show promotion dialog for Human
+          setGameState(prev => ({
+            ...prev,
+            board: newBoard,
+            capturedWhite: newCapturedWhite,
+            capturedBlack: newCapturedBlack,
+            promotionPending: { row: move.row, col: move.col, color: turn },
+            validMoves: [],
+            selectedSquare: null
+          }));
+          return;
         }
       }
     }
@@ -129,7 +138,7 @@ export default function App() {
   const promotePiece = (type: PieceType) => {
     if (!gameState.promotionPending) return;
     const { row, col, color } = gameState.promotionPending;
-    
+
     const newBoard = gameState.board.map(r => [...r]);
     const piece = newBoard[row][col];
     if (piece) {
@@ -141,11 +150,11 @@ export default function App() {
 
   const finalizeTurn = (newBoard: BoardState, currentTurn: Color, capWhite: PieceType[], capBlack: PieceType[]) => {
     const nextTurn = currentTurn === 'white' ? 'black' : 'white';
-    
+
     // Check Game Status
     const inCheck = isKingInCheck(newBoard, nextTurn);
     const hasMoves = hasAnyLegalMoves(newBoard, nextTurn);
-    
+
     let isOver = false;
     let winner: Color | 'draw' | null = null;
 
@@ -179,10 +188,10 @@ export default function App() {
       const timer = setTimeout(() => {
         const aiResult = getBestMove(gameState.board, aiDifficulty, true, AI_COLOR);
         if (aiResult.move) {
-           executeMove(aiResult.move.from.row, aiResult.move.from.col, aiResult.move.to);
+          executeMove(aiResult.move.from.row, aiResult.move.from.col, aiResult.move.to);
         } else {
-            // Should be checkmate/stalemate handled by previous turn check, but safety fallback
-            console.log("AI has no moves");
+          // Should be checkmate/stalemate handled by previous turn check, but safety fallback
+          console.log("AI has no moves");
         }
       }, AI_DELAY_MS);
       return () => clearTimeout(timer);
@@ -194,53 +203,57 @@ export default function App() {
   const getSquareColor = (r: number, c: number) => (r + c) % 2 === 0 ? 'bg-[#f0d9b5]' : 'bg-[#b58863]';
 
   const renderCaptured = (pieces: PieceType[], color: Color) => (
-    <div className="flex flex-wrap gap-1 min-h-[1.5rem] opacity-80">
+    <div className="flex flex-wrap gap-1 min-h-[1.5rem]">
       {pieces.map((p, i) => (
-        <span key={i} className="text-xl" style={{color: color === 'white' ? '#fff' : '#000', textShadow: color === 'white' ? '0 0 2px #000' : 'none'}}>
-          {PIECE_SYMBOLS[color][p]}
-        </span>
+        <img
+          key={i}
+          src={getPieceImage(color, p)}
+          alt={`${color} ${p}`}
+          className="w-5 h-5 object-contain"
+          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+        />
       ))}
     </div>
   );
 
   return (
     <div className="min-h-screen w-full flex flex-col items-center py-8 gap-6">
-      
+
       {/* Header */}
-      <header className="text-center space-y-2 animate-fade-in-down">
-        <h1 className="text-4xl md:text-5xl font-cinzel font-bold text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-500 drop-shadow-glow">
+      <header className="text-center space-y-2">
+        <h1 className="text-4xl md:text-5xl font-cinzel font-bold title-shimmer">
           Chatur Chess AI
         </h1>
-        <p className="text-gray-400 font-light">
+        <p className="text-[#b8860b] font-light">
           {gameMode === 'pvc' ? `Human vs AI (Level ${aiDifficulty})` : 'Player vs Player'}
         </p>
       </header>
 
       {/* Game Info Bar */}
-      <div className="w-full max-w-2xl bg-[#161b22] border border-[#21262d] rounded-xl p-4 flex flex-col md:flex-row justify-between items-center gap-4 shadow-xl">
-        {/* Black Player (AI) */}
+      <div className="w-full max-w-2xl bg-[#1a1814] border border-[#b8860b] rounded-xl p-4 flex flex-col md:flex-row justify-between items-center gap-4 shadow-xl">
+        {/* Black Player */}
         <div className={`flex items-center gap-3 w-full md:w-auto ${gameState.turn === 'black' ? 'opacity-100' : 'opacity-50'}`}>
-          <div className={`w-8 h-8 rounded-full border-2 ${gameState.turn === 'black' ? 'border-yellow-400 shadow-[0_0_15px_rgba(255,215,0,0.5)]' : 'border-[#21262d]'} bg-gradient-to-br from-gray-800 to-black transition-all`} />
+          <div className={`w-8 h-8 rounded-full border-2 ${gameState.turn === 'black' ? 'border-[#d4a574] shadow-[0_0_15px_rgba(212,165,116,0.5)]' : 'border-[#2d2a24]'} bg-[#1a1814] transition-all`} />
           <div className="flex flex-col">
-            <span className="font-medium text-gray-300">Black {gameMode === 'pvc' ? '(AI)' : ''}</span>
+            <span className="font-medium text-[#f5e6c8]">Black {gameMode === 'pvc' ? '(AI)' : ''}</span>
             {renderCaptured(gameState.capturedWhite, 'white')}
           </div>
         </div>
 
         {/* Status Indicator */}
-        <div className="px-6 py-2 bg-gradient-to-r from-yellow-600 to-orange-600 rounded-full font-bold text-sm uppercase tracking-wider shadow-lg transform transition-transform">
-          {gameState.gameOver 
+        <div className="px-6 py-2 bg-[#b8860b] text-[#1a1814] rounded-full font-bold text-sm uppercase tracking-wider shadow-lg">
+          {gameState.gameOver
             ? (gameState.winner === 'draw' ? 'Draw' : `${gameState.winner === 'white' ? 'White' : 'Black'} Wins!`)
             : `${gameState.turn}'s Turn`}
         </div>
 
-        {/* White Player (Human) */}
+        {/* White Player */}
         <div className={`flex flex-row-reverse md:flex-row items-center gap-3 w-full md:w-auto text-right ${gameState.turn === 'white' ? 'opacity-100' : 'opacity-50'}`}>
-           <div className="flex flex-col items-end md:items-start">
-            <span className="font-medium text-gray-300">White</span>
+          <div className="flex flex-col items-end md:items-start">
+            <span className="font-medium text-[#f5e6c8]">White</span>
             {renderCaptured(gameState.capturedBlack, 'black')}
           </div>
-          <div className={`w-8 h-8 rounded-full border-2 ${gameState.turn === 'white' ? 'border-yellow-400 shadow-[0_0_15px_rgba(255,215,0,0.5)]' : 'border-[#21262d]'} bg-gradient-to-br from-white to-gray-300 transition-all`} />
+          <div className={`w-8 h-8 rounded-full border-2 ${gameState.turn === 'white' ? 'border-[#d4a574] shadow-[0_0_15px_rgba(212,165,116,0.5)]' : 'border-[#2d2a24]'} bg-[#f5e6c8] transition-all`} />
         </div>
       </div>
 
@@ -252,105 +265,109 @@ export default function App() {
       )}
 
       {/* Board */}
-      <div className="relative p-1 bg-[#21262d] rounded-lg shadow-2xl">
-         {/* Coordinates */}
-         <div className="absolute left-[-20px] top-0 bottom-0 flex flex-col justify-around text-xs text-gray-500 py-2">
-            {[8,7,6,5,4,3,2,1].map(n => <span key={n}>{n}</span>)}
-         </div>
-         <div className="absolute bottom-[-20px] left-0 right-0 flex justify-around text-xs text-gray-500 px-2">
-            {['a','b','c','d','e','f','g','h'].map(c => <span key={c}>{c}</span>)}
-         </div>
+      <div className={`relative ${gameState.gameOver && gameState.winner && gameState.winner !== 'draw' ? 'victory-board' : ''}`}>
+        {/* Board with background image */}
+        <div
+          className="w-[min(90vw,540px)] h-[min(90vw,540px)]"
+          style={{
+            backgroundImage: `url(${getBasePath()}board.png)`,
+            backgroundSize: '100% 100%',
+            backgroundPosition: 'center',
+            padding: '7%',
+          }}
+        >
+          {/* Grid overlay */}
+          <div className="grid grid-cols-8 grid-rows-8 w-full h-full">
+            {gameState.board.map((rowArr, r) =>
+              rowArr.map((piece, c) => {
+                const isSelected = gameState.selectedSquare?.row === r && gameState.selectedSquare?.col === c;
+                const isValidMove = gameState.validMoves.some(m => m.row === r && m.col === c);
+                const isCapture = isValidMove && piece !== null;
+                const isKingChecked = gameState.check && piece?.type === PieceType.KING && piece?.color === gameState.turn;
 
-        <div className="grid grid-cols-8 grid-rows-8 w-[min(85vw,500px)] h-[min(85vw,500px)] border-4 border-[#21262d] rounded overflow-hidden">
-          {gameState.board.map((rowArr, r) => 
-            rowArr.map((piece, c) => {
-              const isSelected = gameState.selectedSquare?.row === r && gameState.selectedSquare?.col === c;
-              const isValidMove = gameState.validMoves.some(m => m.row === r && m.col === c);
-              const isCapture = isValidMove && piece !== null;
-              const isKingChecked = gameState.check && piece?.type === PieceType.KING && piece?.color === gameState.turn;
-              
-              return (
-                <div 
-                  key={`${r}-${c}`}
-                  onClick={() => handleSquareClick(r, c)}
-                  className={`
-                    relative flex items-center justify-center text-[clamp(1.5rem,5vw,2.5rem)] cursor-pointer select-none
-                    ${getSquareColor(r, c)}
-                    ${isSelected ? 'ring-inset ring-4 ring-yellow-400' : ''}
-                    ${isKingChecked ? 'bg-red-500/80 animate-pulse' : ''}
-                    transition-colors duration-150
-                  `}
-                >
-                  {/* Valid Move Marker */}
-                  {isValidMove && !isCapture && (
-                    <div className="absolute w-3 h-3 bg-green-500/50 rounded-full" />
-                  )}
-                  {/* Capture Marker */}
-                  {isCapture && (
-                    <div className="absolute inset-0 bg-red-500/30 ring-inset ring-4 ring-red-500/50" />
-                  )}
+                return (
+                  <div
+                    key={`${r}-${c}`}
+                    onClick={() => handleSquareClick(r, c)}
+                    className={`
+                      relative flex items-center justify-center cursor-pointer select-none bg-transparent
+                      ${isSelected ? 'ring-inset ring-3 ring-[#d4a574]' : ''}
+                      ${isKingChecked ? 'check-square' : ''}
+                      transition-all duration-150
+                    `}
+                  >
+                    {/* Valid Move Marker */}
+                    {isValidMove && !isCapture && (
+                      <div className="absolute w-4 h-4 valid-move-dot rounded-full" />
+                    )}
+                    {/* Capture Marker */}
+                    {isCapture && (
+                      <div className="absolute inset-1 capture-highlight" />
+                    )}
 
-                  {/* Piece */}
-                  {piece && (
-                    <span 
+                    {/* Piece as image */}
+                    {piece && (
+                      <img
+                        src={getPieceImage(piece.color, piece.type)}
+                        alt={`${piece.color} ${piece.type}`}
                         className={`
-                            z-10 transition-transform duration-200 
-                            ${piece.type === PieceType.CHATUR ? 'font-bold' : ''} 
-                            ${isSelected ? 'scale-110' : 'hover:scale-105'}
-                            drop-shadow-md
+                          z-10 transition-transform duration-200 w-[85%] h-[85%] object-contain
+                          ${isSelected ? 'scale-110' : 'hover:scale-105'}
                         `}
-                        style={{ color: piece.color === 'white' ? '#fff' : '#1a1a1a', textShadow: piece.color === 'white' ? '0 1px 2px rgba(0,0,0,0.4)' : 'none' }}
-                    >
-                      {PIECE_SYMBOLS[piece.color][piece.type]}
-                    </span>
-                  )}
-                </div>
-              );
-            })
-          )}
+                        style={{
+                          filter: 'drop-shadow(0 2px 3px rgba(0,0,0,0.4))'
+                        }}
+                        draggable={false}
+                      />
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
         </div>
       </div>
 
       {/* Controls */}
       <div className="flex flex-wrap justify-center gap-4 mt-4">
-        <button 
+        <button
           onClick={resetGame}
-          className="px-6 py-2 bg-gradient-to-r from-yellow-500 to-orange-500 text-black font-semibold rounded-lg hover:translate-y-[-2px] hover:shadow-lg transition-all active:scale-95"
+          className="btn-sacred px-6 py-2 font-semibold rounded-lg hover:translate-y-[-2px] transition-all active:scale-95"
         >
           ↻ New Game
         </button>
-        <button 
+        <button
           onClick={() => setShowRules(true)}
-          className="px-6 py-2 bg-[#21262d] border border-gray-600 rounded-lg hover:bg-[#30363d] transition-all"
+          className="btn-sacred px-6 py-2 rounded-lg transition-all"
         >
           📖 Rules
         </button>
-        
-        <div className="flex items-center gap-2 bg-[#21262d] p-1 rounded-lg border border-gray-600">
-           <button 
-             onClick={() => { setGameMode('pvc'); resetGame(); }}
-             className={`px-3 py-1 rounded text-sm ${gameMode === 'pvc' ? 'bg-yellow-500 text-black font-bold' : 'text-gray-400'}`}
-           >
-             Vs AI
-           </button>
-           <button 
-             onClick={() => { setGameMode('pvp'); resetGame(); }}
-             className={`px-3 py-1 rounded text-sm ${gameMode === 'pvp' ? 'bg-yellow-500 text-black font-bold' : 'text-gray-400'}`}
-           >
-             2 Player
-           </button>
+
+        <div className="flex items-center gap-2 bg-[#1a1814] p-1 rounded-lg border border-[#b8860b]">
+          <button
+            onClick={() => { setGameMode('pvc'); resetGame(); }}
+            className={`px-3 py-1 rounded text-sm transition-all ${gameMode === 'pvc' ? 'bg-[#b8860b] text-[#1a1814] font-bold' : 'text-[#f5e6c8]'}`}
+          >
+            Vs AI
+          </button>
+          <button
+            onClick={() => { setGameMode('pvp'); resetGame(); }}
+            className={`px-3 py-1 rounded text-sm transition-all ${gameMode === 'pvp' ? 'bg-[#b8860b] text-[#1a1814] font-bold' : 'text-[#f5e6c8]'}`}
+          >
+            2 Player
+          </button>
         </div>
 
         {gameMode === 'pvc' && (
-           <select 
-             value={aiDifficulty}
-             onChange={(e) => setAiDifficulty(Number(e.target.value))}
-             className="bg-[#21262d] border border-gray-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-yellow-500"
-           >
-             <option value={2}>Easy</option>
-             <option value={3}>Medium</option>
-             <option value={4}>Hard</option>
-           </select>
+          <select
+            value={aiDifficulty}
+            onChange={(e) => setAiDifficulty(Number(e.target.value))}
+            className="bg-[#1a1814] border border-[#b8860b] text-[#f5e6c8] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#d4a574]"
+          >
+            <option value={2}>Easy</option>
+            <option value={3}>Medium</option>
+            <option value={4}>Hard</option>
+          </select>
         )}
       </div>
 
@@ -358,52 +375,52 @@ export default function App() {
       {showRules && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowRules(false)}>
           <div className="bg-[#161b22] border border-[#30363d] rounded-xl max-w-lg w-full max-h-[80vh] overflow-y-auto p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
-             <div className="flex justify-between items-center mb-4 border-b border-[#30363d] pb-2">
-                <h2 className="text-2xl font-cinzel text-yellow-400">Rules</h2>
-                <button onClick={() => setShowRules(false)} className="text-gray-400 hover:text-white text-2xl">&times;</button>
-             </div>
-             
-             <div className="space-y-4 text-gray-300">
-                <section>
-                    <h3 className="text-lg font-bold text-orange-400 mb-2">The Chatur Piece (⛃ / ⛂)</h3>
-                    <div className="flex justify-center gap-8 text-4xl mb-2 bg-[#0d1117] p-4 rounded-lg">
-                        <span className="text-white drop-shadow-md">⛃</span>
-                        <span className="text-black bg-white rounded-full px-1">⛂</span>
-                    </div>
-                    <ul className="list-disc pl-5 space-y-1 text-sm">
-                        <li><strong>Movement:</strong> Moves <span className="text-yellow-400">diagonally forward</span> (1 step, or 2 on first move).</li>
-                        <li><strong>Capture:</strong> Captures <span className="text-red-400">straight forward</span> (Inverse of a Pawn).</li>
-                        <li><strong>Position:</strong> Alternates with Pawns on the starting rank (b, d, f, h).</li>
-                    </ul>
-                </section>
-                <section>
-                    <h3 className="text-lg font-bold text-orange-400 mb-2">Standard Rules</h3>
-                    <p className="text-sm">Standard Chess rules apply for all other pieces (King, Queen, Rook, Bishop, Knight, Pawn). Win by Checkmate.</p>
-                </section>
-             </div>
+            <div className="flex justify-between items-center mb-4 border-b border-[#30363d] pb-2">
+              <h2 className="text-2xl font-cinzel text-yellow-400">Rules</h2>
+              <button onClick={() => setShowRules(false)} className="text-gray-400 hover:text-white text-2xl">&times;</button>
+            </div>
+
+            <div className="space-y-4 text-gray-300">
+              <section>
+                <h3 className="text-lg font-bold text-orange-400 mb-2">The Chatur Piece (⛃ / ⛂)</h3>
+                <div className="flex justify-center gap-8 text-4xl mb-2 bg-[#0d1117] p-4 rounded-lg">
+                  <span className="text-white drop-shadow-md">⛃</span>
+                  <span className="text-black bg-white rounded-full px-1">⛂</span>
+                </div>
+                <ul className="list-disc pl-5 space-y-1 text-sm">
+                  <li><strong>Movement:</strong> Moves <span className="text-yellow-400">diagonally forward</span> (1 step, or 2 on first move).</li>
+                  <li><strong>Capture:</strong> Captures <span className="text-red-400">straight forward</span> (Inverse of a Pawn).</li>
+                  <li><strong>Position:</strong> Alternates with Pawns on the starting rank (b, d, f, h).</li>
+                </ul>
+              </section>
+              <section>
+                <h3 className="text-lg font-bold text-orange-400 mb-2">Standard Rules</h3>
+                <p className="text-sm">Standard Chess rules apply for all other pieces (King, Queen, Rook, Bishop, Knight, Pawn). Win by Checkmate.</p>
+              </section>
+            </div>
           </div>
         </div>
       )}
 
       {/* Promotion Modal */}
       {gameState.promotionPending && (
-         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50">
-            <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-6 shadow-2xl text-center">
-               <h2 className="text-xl font-cinzel text-yellow-400 mb-4">Promote Piece</h2>
-               <div className="flex gap-4">
-                  {[PieceType.QUEEN, PieceType.ROOK, PieceType.BISHOP, PieceType.KNIGHT].map(type => (
-                      <button 
-                        key={type}
-                        onClick={() => promotePiece(type)}
-                        className="text-4xl p-4 bg-[#21262d] rounded-lg hover:bg-[#30363d] hover:scale-110 transition-all border border-transparent hover:border-yellow-500"
-                        style={{ color: gameState.promotionPending!.color === 'white' ? '#fff' : '#000', backgroundColor: gameState.promotionPending!.color === 'black' ? '#e5e7eb' : '#21262d' }}
-                      >
-                         {PIECE_SYMBOLS[gameState.promotionPending!.color][type]}
-                      </button>
-                  ))}
-               </div>
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-6 shadow-2xl text-center">
+            <h2 className="text-xl font-cinzel text-yellow-400 mb-4">Promote Piece</h2>
+            <div className="flex gap-4">
+              {[PieceType.QUEEN, PieceType.ROOK, PieceType.BISHOP, PieceType.KNIGHT].map(type => (
+                <button
+                  key={type}
+                  onClick={() => promotePiece(type)}
+                  className="text-4xl p-4 bg-[#21262d] rounded-lg hover:bg-[#30363d] hover:scale-110 transition-all border border-transparent hover:border-yellow-500"
+                  style={{ color: gameState.promotionPending!.color === 'white' ? '#fff' : '#000', backgroundColor: gameState.promotionPending!.color === 'black' ? '#e5e7eb' : '#21262d' }}
+                >
+                  {PIECE_SYMBOLS[gameState.promotionPending!.color][type]}
+                </button>
+              ))}
             </div>
-         </div>
+          </div>
+        </div>
       )}
     </div>
   );
