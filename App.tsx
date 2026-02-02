@@ -304,7 +304,8 @@ export default function App() {
     }
 
     // Track last move for highlight
-    setLastMove({ from: { row: fromRow, col: fromCol }, to: { row: move.row, col: move.col } });
+    const newLastMove = { from: { row: fromRow, col: fromCol }, to: { row: move.row, col: move.col } };
+    setLastMove(newLastMove);
 
     // Execute Move
     let newBoard = simulateMove(board, fromRow, fromCol, move.row, move.col, move.castling);
@@ -317,7 +318,7 @@ export default function App() {
         // If AI, auto-promote to Queen
         if (gameMode === 'pvc' && turn === AI_COLOR) {
           newBoard[move.row][move.col] = { ...movedPiece, type: PieceType.QUEEN };
-          finalizeTurn(newBoard, turn, newCapturedWhite, newCapturedBlack);
+          finalizeTurn(newBoard, turn, newCapturedWhite, newCapturedBlack, newLastMove);
           return;
         } else {
           // Show promotion dialog for Human
@@ -330,12 +331,14 @@ export default function App() {
             validMoves: [],
             selectedSquare: null
           }));
+          // We don't finalize turn yet, so lastMove is set but turn update waits for promotion
+          // Note: When promotion finishes, we need to use this lastMove
           return;
         }
       }
     }
 
-    finalizeTurn(newBoard, turn, newCapturedWhite, newCapturedBlack);
+    finalizeTurn(newBoard, turn, newCapturedWhite, newCapturedBlack, newLastMove);
   };
 
   const promotePiece = (type: PieceType) => {
@@ -348,10 +351,17 @@ export default function App() {
       newBoard[row][col] = { ...piece, type };
     }
 
-    finalizeTurn(newBoard, color, gameState.capturedWhite, gameState.capturedBlack);
+    // Use current lastMove from state (it was set before promotion started)
+    finalizeTurn(newBoard, color, gameState.capturedWhite, gameState.capturedBlack, lastMove);
   };
 
-  const finalizeTurn = (newBoard: BoardState, currentTurn: Color, capWhite: PieceType[], capBlack: PieceType[]) => {
+  const finalizeTurn = (
+    newBoard: BoardState,
+    currentTurn: Color,
+    capWhite: PieceType[],
+    capBlack: PieceType[],
+    currentLastMove: { from: { row: number; col: number }; to: { row: number; col: number } } | null = null
+  ) => {
     const nextTurn = currentTurn === 'white' ? 'black' : 'white';
 
     // Check Game Status
@@ -398,7 +408,7 @@ export default function App() {
         isOver,
         winner,
         inCheck,
-        lastMove
+        currentLastMove || lastMove // Use passed move or fall back to state (though state might be stale)
       );
     }
   };

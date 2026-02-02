@@ -1,8 +1,8 @@
 # ♔ Chaturanga ♚
 
-> A unique chess variant featuring the **Chatur** — a new piece that moves diagonally and captures straight! Now with **AI opponent**, **sound effects**, and a stunning **Indian sacred geometry theme**.
+> A unique chess variant featuring the **Chatur** — a new piece that moves diagonally and captures straight! Now with **AI opponent**, **online multiplayer**, **sound effects**, and a stunning **Indian sacred geometry theme**.
 
-![Version](https://img.shields.io/badge/version-2.1.0-gold)
+![Version](https://img.shields.io/badge/version-2.2.0-gold)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
@@ -11,8 +11,13 @@
 
 ---
 
-## 🎯 What's New in v2.1
+## 🎯 What's New in v2.2
 
+- 🌐 **Online Multiplayer** — Real-time play with friends using Supabase
+  - 🎲 Create/Join game rooms via 6-digit codes
+  - 🔄 Instant move synchronization
+  - 🚪 Smart disconnect detection
+  - 📱 Optimized for cross-device play
 - 🔊 **Sound Effects** — Authentic wooden chess piece sounds (move, capture, check, victory)
 - ↩️ **Undo/Redo** — Take back moves (smart 2-step for AI mode)
 - 🟡 **Last Move Highlight** — See which squares were involved in the previous move
@@ -131,6 +136,7 @@ The game starts with an alternating pattern of pawns and chaturs in the second r
 ### Core Gameplay
 - ✅ Full chess logic with all standard pieces
 - ✅ New Chatur piece with unique movement
+- ✅ **Online Multiplayer** (Supabase)
 - ✅ **AI opponent** with 3 difficulty levels
 - ✅ **2-Player local mode**
 - ✅ Legal move validation
@@ -209,7 +215,13 @@ npm run preview
 | Mode | Description |
 |------|-------------|
 | **Vs AI** | Play against the computer (3 difficulty levels) |
-| **2 Player** | Play locally against a friend |
+| **Local PvP** | Play locally against a friend on same device |
+| **Online** | Create/Join room to play with friend remotely |
+
+### Online Play
+1. **Host**: Select "Online" -> "Create Game". Share the 6-letter code.
+2. **Guest**: Select "Online" -> "Join Game". Enter the code.
+3. Play! Board flips automatically for the black player.
 
 ### AI Difficulty
 

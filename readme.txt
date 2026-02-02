@@ -1,16 +1,21 @@
 ================================================================================
-                            CHATURANGA v2.1.0
+                            CHATURANGA v2.2.0
                       Ancient Chess Reimagined
 ================================================================================
 
 A unique chess variant featuring the CHATUR - a new piece that moves 
-diagonally and captures straight! Now with AI opponent, sound effects, 
-and a stunning Indian sacred geometry theme.
+diagonally and captures straight! Now with AI opponent, Online Multiplayer, 
+sound effects, and a stunning Indian sacred geometry theme.
 
 ================================================================================
-                          WHAT'S NEW IN v2.1
+                          WHAT'S NEW IN v2.2
 ================================================================================
 
+* ONLINE MULTIPLAYER - Real-time play with friends using Supabase
+    + Create/Join game rooms via 6-digit codes
+    + Instant move synchronization
+    + Smart disconnect detection
+    + Optimized for cross-device play
 * SOUND EFFECTS - Authentic wooden chess piece sounds
 * UNDO/REDO - Take back moves (smart 2-step for AI mode)
 * LAST MOVE HIGHLIGHT - See which squares were involved in previous move
@@ -66,6 +71,7 @@ P = Pawn, C = Chatur
 GAMEPLAY:
   * Full chess logic with all standard pieces
   * New Chatur piece with unique movement
+  * Online Multiplayer (Supabase)
   * AI opponent with 3 difficulty levels
   * 2-Player local mode
   * Legal move validation
@@ -126,7 +132,13 @@ CONTROLS:
 
 GAME MODES:
   * Vs AI - Play against the computer (Easy/Medium/Hard)
-  * 2 Player - Play locally against a friend
+  * Local PvP - Play locally against a friend on same device
+  * Online - Create/Join room to play with friend remotely
+
+ONLINE PLAY:
+1. Host: Select "Online" -> "Create Game". Share the 6-letter code.
+2. Guest: Select "Online" -> "Join Game". Enter the code.
+3. Play! Board flips automatically for the black player.
 
 AI DIFFICULTY:
   * Easy - Depth 2 search, makes some mistakes
@@ -142,6 +154,7 @@ AI DIFFICULTY:
   * Vite - Fast development and bundling
   * TailwindCSS - Utility-first styling
   * Web Audio API - Sound effects via Lichess audio
+  * Supabase - Database & Realtime sync for multiplayer
 
 ================================================================================
                             BROWSER SUPPORT
