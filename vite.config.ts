@@ -21,9 +21,9 @@ export default defineConfig(({ mode }) => {
         manifest: {
           name: 'Chaturanga',
           short_name: 'Chaturanga',
-          description: 'Play chess with the unique Chatur piece against AI',
-          theme_color: '#0d1117',
-          background_color: '#0d1117',
+          description: 'Chaturanga - Ancient Chess Reimagined. Play with the unique Chatur piece against AI.',
+          theme_color: '#1a1814',
+          background_color: '#1a1814',
           display: 'standalone',
           orientation: 'portrait',
           start_url: '.',

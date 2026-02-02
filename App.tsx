@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createInitialBoard, getLegalMoves, isKingInCheck, simulateMove, hasAnyLegalMoves } from './utils/engine';
 import { getBestMove } from './utils/ai';
 import { BOARD_SIZE, PIECE_SYMBOLS } from './utils/constants';
+import { playMoveSound, playCaptureSound, playCheckSound, playVictorySound, playDrawSound, playUndoSound, playRedoSound, playStartSound } from './utils/sounds';
 
 // Helper to get base path for assets
 const getBasePath = () => import.meta.env.BASE_URL || '/';
@@ -42,6 +43,9 @@ export default function App() {
   const [history, setHistory] = useState<GameState[]>([]);
   const [future, setFuture] = useState<GameState[]>([]);
 
+  // Last move for highlighting
+  const [lastMove, setLastMove] = useState<{ from: Position; to: Position } | null>(null);
+
   // Refs for AI handling to avoid stale closures in timeouts
   const gameStateRef = useRef(gameState);
   gameStateRef.current = gameState;
@@ -67,7 +71,9 @@ export default function App() {
     });
     setHistory([]);
     setFuture([]);
+    setLastMove(null);
     setShowStartScreen(false);
+    playStartSound();
   };
 
   // Undo last move (in AI mode, undo 2 moves to skip AI's turn)
@@ -90,6 +96,7 @@ export default function App() {
 
     setHistory(prev => prev.slice(0, -stepsToUndo));
     setGameState(previousState);
+    playUndoSound();
   };
 
   // Redo move (in AI mode, redo 2 moves)
@@ -111,6 +118,7 @@ export default function App() {
 
     setFuture(prev => prev.slice(stepsToRedo));
     setGameState(nextState);
+    playRedoSound();
   };
 
   // Save state to history before making a move
@@ -167,7 +175,13 @@ export default function App() {
     if (capturedPiece) {
       if (capturedPiece.color === 'white') newCapturedWhite.push(capturedPiece.type);
       else newCapturedBlack.push(capturedPiece.type);
+      playCaptureSound();
+    } else {
+      playMoveSound();
     }
+
+    // Track last move for highlight
+    setLastMove({ from: { row: fromRow, col: fromCol }, to: { row: move.row, col: move.col } });
 
     // Execute Move
     let newBoard = simulateMove(board, fromRow, fromCol, move.row, move.col, move.castling);
@@ -228,9 +242,13 @@ export default function App() {
       isOver = true;
       if (inCheck) {
         winner = currentTurn; // The player who just moved won
+        playVictorySound();
       } else {
         winner = 'draw'; // Stalemate
+        playDrawSound();
       }
+    } else if (inCheck) {
+      playCheckSound();
     }
 
     setGameState({
@@ -365,13 +383,16 @@ export default function App() {
                 const isValidMove = gameState.validMoves.some(m => m.row === r && m.col === c);
                 const isCapture = isValidMove && piece !== null;
                 const isKingChecked = gameState.check && piece?.type === PieceType.KING && piece?.color === gameState.turn;
+                const isLastMoveFrom = lastMove?.from.row === r && lastMove?.from.col === c;
+                const isLastMoveTo = lastMove?.to.row === r && lastMove?.to.col === c;
 
                 return (
                   <div
                     key={`${r}-${c}`}
                     onClick={() => handleSquareClick(r, c)}
                     className={`
-                      relative flex items-center justify-center cursor-pointer select-none bg-transparent
+                      relative flex items-center justify-center cursor-pointer select-none
+                      ${isLastMoveFrom || isLastMoveTo ? 'bg-[#b8860b]/30' : 'bg-transparent'}
                       ${isSelected ? 'ring-inset ring-3 ring-[#d4a574]' : ''}
                       ${isKingChecked ? 'check-square' : ''}
                       transition-all duration-150
@@ -484,10 +505,10 @@ export default function App() {
 
             <div className="space-y-4 text-gray-300">
               <section>
-                <h3 className="text-lg font-bold text-orange-400 mb-2">The Chatur Piece (⛃ / ⛂)</h3>
-                <div className="flex justify-center gap-8 text-4xl mb-2 bg-[#0d1117] p-4 rounded-lg">
-                  <span className="text-white drop-shadow-md">⛃</span>
-                  <span className="text-black bg-white rounded-full px-1">⛂</span>
+                <h3 className="text-lg font-bold text-orange-400 mb-2">The Chatur Piece</h3>
+                <div className="flex justify-center gap-8 mb-2 bg-[#0d1117] p-4 rounded-lg">
+                  <img src={getPieceImage('white', 'chatur')} alt="White Chatur" className="w-12 h-12 object-contain" />
+                  <img src={getPieceImage('black', 'chatur')} alt="Black Chatur" className="w-12 h-12 object-contain" />
                 </div>
                 <ul className="list-disc pl-5 space-y-1 text-sm">
                   <li><strong>Movement:</strong> Moves <span className="text-yellow-400">diagonally forward</span> (1 step, or 2 on first move).</li>
