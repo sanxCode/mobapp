@@ -22,6 +22,7 @@ export default function App() {
   const [gameMode, setGameMode] = useState<'pvc' | 'pvp'>('pvc'); // Player vs Computer, Player vs Player
   const [aiDifficulty, setAiDifficulty] = useState<number>(3); // Search depth
   const [showRules, setShowRules] = useState(false);
+  const [showStartScreen, setShowStartScreen] = useState(true); // Show start popup on load
 
   // Game State
   const [gameState, setGameState] = useState<GameState>(() => ({
@@ -37,11 +38,21 @@ export default function App() {
     promotionPending: null
   }));
 
+  // Move History for Undo/Redo
+  const [history, setHistory] = useState<GameState[]>([]);
+  const [future, setFuture] = useState<GameState[]>([]);
+
   // Refs for AI handling to avoid stale closures in timeouts
   const gameStateRef = useRef(gameState);
   gameStateRef.current = gameState;
 
-  const resetGame = () => {
+  // Show start screen (for New Game button)
+  const openStartScreen = () => {
+    setShowStartScreen(true);
+  };
+
+  // Actually reset and start the game
+  const startGame = () => {
     setGameState({
       board: createInitialBoard(),
       turn: 'white',
@@ -54,6 +65,58 @@ export default function App() {
       capturedBlack: [],
       promotionPending: null
     });
+    setHistory([]);
+    setFuture([]);
+    setShowStartScreen(false);
+  };
+
+  // Undo last move (in AI mode, undo 2 moves to skip AI's turn)
+  const undoMove = () => {
+    if (history.length === 0) return;
+
+    // In PvC mode, undo 2 moves (player + AI) if possible
+    const stepsToUndo = (gameMode === 'pvc' && history.length >= 2) ? 2 : 1;
+
+    // Get the state to restore
+    const previousState = history[history.length - stepsToUndo];
+
+    // Store current state and intermediate states for redo
+    if (stepsToUndo === 2) {
+      // Store both states: [intermediate AI state, current state]
+      setFuture(prev => [history[history.length - 1], gameState, ...prev]);
+    } else {
+      setFuture(prev => [gameState, ...prev]);
+    }
+
+    setHistory(prev => prev.slice(0, -stepsToUndo));
+    setGameState(previousState);
+  };
+
+  // Redo move (in AI mode, redo 2 moves)
+  const redoMove = () => {
+    if (future.length === 0) return;
+
+    // In PvC mode, redo 2 moves if possible
+    const stepsToRedo = (gameMode === 'pvc' && future.length >= 2) ? 2 : 1;
+
+    // Get the target state
+    const nextState = future[stepsToRedo - 1];
+
+    // Store current state and intermediate states to history
+    if (stepsToRedo === 2) {
+      setHistory(prev => [...prev, gameState, future[0]]);
+    } else {
+      setHistory(prev => [...prev, gameState]);
+    }
+
+    setFuture(prev => prev.slice(stepsToRedo));
+    setGameState(nextState);
+  };
+
+  // Save state to history before making a move
+  const saveToHistory = () => {
+    setHistory(prev => [...prev, { ...gameState }]);
+    setFuture([]); // Clear redo stack when new move is made
   };
 
   // --- Move Handling ---
@@ -92,6 +155,9 @@ export default function App() {
   };
 
   const executeMove = (fromRow: number, fromCol: number, move: Move) => {
+    // Save current state to history before making move
+    saveToHistory();
+
     const { board, turn, capturedWhite, capturedBlack } = gameState;
 
     // Capture logic
@@ -224,9 +290,17 @@ export default function App() {
         <h1 className="text-4xl md:text-5xl font-cinzel font-bold title-shimmer">
           Chaturanga
         </h1>
-        <p className="text-[#b8860b] font-light">
-          {gameMode === 'pvc' ? `Human vs AI (Level ${aiDifficulty})` : 'Player vs Player'}
-        </p>
+        <div className="flex items-center justify-center gap-4">
+          <p className="text-[#b8860b] font-light">
+            {gameMode === 'pvc' ? `Human vs AI (Level ${aiDifficulty})` : 'Player vs Player'}
+          </p>
+          <button
+            onClick={openStartScreen}
+            className="text-xs px-3 py-1 bg-[#2d2a24] text-[#b8860b] border border-[#b8860b]/50 rounded-full hover:bg-[#b8860b] hover:text-[#1a1814] transition-all"
+          >
+            ↻ New
+          </button>
+        </div>
       </header>
 
       {/* Game Info Bar */}
@@ -240,11 +314,24 @@ export default function App() {
           </div>
         </div>
 
-        {/* Status Indicator */}
-        <div className="px-6 py-2 bg-[#b8860b] text-[#1a1814] rounded-full font-bold text-sm uppercase tracking-wider shadow-lg">
-          {gameState.gameOver
-            ? (gameState.winner === 'draw' ? 'Draw' : `${gameState.winner === 'white' ? 'White' : 'Black'} Wins!`)
-            : `${gameState.turn}'s Turn`}
+        {/* Undo/Redo Buttons */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={undoMove}
+            disabled={history.length === 0 || gameState.gameOver}
+            className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${history.length > 0 && !gameState.gameOver ? 'bg-[#b8860b] text-[#1a1814] hover:bg-[#d4a574]' : 'bg-[#2d2a24] text-[#b8860b]/30 cursor-not-allowed'}`}
+            title="Undo"
+          >
+            ↩
+          </button>
+          <button
+            onClick={redoMove}
+            disabled={future.length === 0 || gameState.gameOver}
+            className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${future.length > 0 && !gameState.gameOver ? 'bg-[#b8860b] text-[#1a1814] hover:bg-[#d4a574]' : 'bg-[#2d2a24] text-[#b8860b]/30 cursor-not-allowed'}`}
+            title="Redo"
+          >
+            ↪
+          </button>
         </div>
 
         {/* White Player */}
@@ -328,48 +415,69 @@ export default function App() {
         </div>
       </div>
 
-      {/* Controls */}
-      <div className="flex flex-wrap justify-center gap-4 mt-4">
-        <button
-          onClick={resetGame}
-          className="btn-sacred px-6 py-2 font-semibold rounded-lg hover:translate-y-[-2px] transition-all active:scale-95"
-        >
-          ↻ New Game
-        </button>
-        <button
-          onClick={() => setShowRules(true)}
-          className="btn-sacred px-6 py-2 rounded-lg transition-all"
-        >
-          📖 Rules
-        </button>
+      {/* Start Screen Modal */}
+      {showStartScreen && (
+        <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-[#1a1814] border-2 border-[#b8860b] rounded-2xl max-w-md w-full p-8 shadow-2xl text-center">
+            {/* Title */}
+            <h1 className="text-4xl font-cinzel font-bold title-shimmer mb-2">Chaturanga</h1>
+            <p className="text-[#b8860b]/70 text-sm mb-8">Ancient Chess Reimagined</p>
 
-        <div className="flex items-center gap-2 bg-[#1a1814] p-1 rounded-lg border border-[#b8860b]">
-          <button
-            onClick={() => { setGameMode('pvc'); resetGame(); }}
-            className={`px-3 py-1 rounded text-sm transition-all ${gameMode === 'pvc' ? 'bg-[#b8860b] text-[#1a1814] font-bold' : 'text-[#f5e6c8]'}`}
-          >
-            Vs AI
-          </button>
-          <button
-            onClick={() => { setGameMode('pvp'); resetGame(); }}
-            className={`px-3 py-1 rounded text-sm transition-all ${gameMode === 'pvp' ? 'bg-[#b8860b] text-[#1a1814] font-bold' : 'text-[#f5e6c8]'}`}
-          >
-            2 Player
-          </button>
+            {/* Game Mode Selection */}
+            <div className="mb-6">
+              <p className="text-[#f5e6c8] text-sm mb-3">Select Game Mode</p>
+              <div className="flex gap-3 justify-center">
+                <button
+                  onClick={() => setGameMode('pvc')}
+                  className={`px-6 py-3 rounded-lg font-semibold transition-all ${gameMode === 'pvc' ? 'bg-[#b8860b] text-[#1a1814]' : 'bg-[#2d2a24] text-[#f5e6c8] border border-[#b8860b]/30 hover:border-[#b8860b]'}`}
+                >
+                  🤖 Vs AI
+                </button>
+                <button
+                  onClick={() => setGameMode('pvp')}
+                  className={`px-6 py-3 rounded-lg font-semibold transition-all ${gameMode === 'pvp' ? 'bg-[#b8860b] text-[#1a1814]' : 'bg-[#2d2a24] text-[#f5e6c8] border border-[#b8860b]/30 hover:border-[#b8860b]'}`}
+                >
+                  👥 2 Player
+                </button>
+              </div>
+            </div>
+
+            {/* AI Difficulty (only if vs AI) */}
+            {gameMode === 'pvc' && (
+              <div className="mb-6">
+                <p className="text-[#f5e6c8] text-sm mb-3">AI Difficulty</p>
+                <div className="flex gap-2 justify-center">
+                  {[{ val: 2, label: 'Easy' }, { val: 3, label: 'Medium' }, { val: 4, label: 'Hard' }].map(d => (
+                    <button
+                      key={d.val}
+                      onClick={() => setAiDifficulty(d.val)}
+                      className={`px-4 py-2 rounded-lg text-sm transition-all ${aiDifficulty === d.val ? 'bg-[#b8860b] text-[#1a1814] font-bold' : 'bg-[#2d2a24] text-[#f5e6c8] border border-[#b8860b]/30 hover:border-[#b8860b]'}`}
+                    >
+                      {d.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Start Button */}
+            <button
+              onClick={startGame}
+              className="w-full py-4 bg-gradient-to-r from-[#b8860b] to-[#d4a574] text-[#1a1814] rounded-xl font-bold text-lg hover:scale-[1.02] transition-all shadow-lg mb-4"
+            >
+              ▶ Start Game
+            </button>
+
+            {/* Rules Link */}
+            <button
+              onClick={() => { setShowStartScreen(false); setShowRules(true); }}
+              className="text-[#b8860b]/70 hover:text-[#d4a574] text-sm transition-colors"
+            >
+              📖 View Rules
+            </button>
+          </div>
         </div>
-
-        {gameMode === 'pvc' && (
-          <select
-            value={aiDifficulty}
-            onChange={(e) => setAiDifficulty(Number(e.target.value))}
-            className="bg-[#1a1814] border border-[#b8860b] text-[#f5e6c8] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#d4a574]"
-          >
-            <option value={2}>Easy</option>
-            <option value={3}>Medium</option>
-            <option value={4}>Hard</option>
-          </select>
-        )}
-      </div>
+      )}
 
       {/* Rules Modal */}
       {showRules && (
@@ -425,7 +533,7 @@ export default function App() {
 
       {/* Credits Footer */}
       <footer className="mt-6 text-center text-xs text-[#b8860b]/50">
-        Created by Jiv Dost Mahan • Designed by Sunny Vaghela
+        Created by Jiv Dost Mahan • Designed and Developed by Sunny Vaghela
       </footer>
     </div>
   );
