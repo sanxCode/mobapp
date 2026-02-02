@@ -19,8 +19,8 @@ export default defineConfig(({ mode }) => {
         registerType: 'autoUpdate',
         includeAssets: ['favicon.ico', 'apple-touch-icon.png'],
         manifest: {
-          name: 'Chatur Chess',
-          short_name: 'Chatur Chess',
+          name: 'Chaturanga',
+          short_name: 'Chaturanga',
           description: 'Play chess with the unique Chatur piece against AI',
           theme_color: '#0d1117',
           background_color: '#0d1117',

@@ -222,7 +222,7 @@ export default function App() {
       {/* Header */}
       <header className="text-center space-y-2">
         <h1 className="text-4xl md:text-5xl font-cinzel font-bold title-shimmer">
-          Chatur Chess AI
+          Chaturanga
         </h1>
         <p className="text-[#b8860b] font-light">
           {gameMode === 'pvc' ? `Human vs AI (Level ${aiDifficulty})` : 'Player vs Player'}
@@ -422,6 +422,11 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Credits Footer */}
+      <footer className="mt-6 text-center text-xs text-[#b8860b]/50">
+        Created by Jiv Dost Mahan • Designed by Sunny Vaghela
+      </footer>
     </div>
   );
 }
