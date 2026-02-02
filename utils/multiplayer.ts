@@ -1,0 +1,244 @@
+import { supabase } from './supabase';
+import { BoardState, Color, PieceType } from '../types';
+import { createInitialBoard } from './engine';
+
+// Game room type
+export interface GameRoom {
+    id: string;
+    code: string;
+    host_id: string;
+    guest_id: string | null;
+    board_state: BoardState;
+    current_turn: Color;
+    captured_white: PieceType[];
+    captured_black: PieceType[];
+    game_over: boolean;
+    winner: Color | 'draw' | null;
+    in_check: boolean;
+    status: 'waiting' | 'playing' | 'finished';
+    last_move: { from: { row: number; col: number }; to: { row: number; col: number } } | null;
+    created_at: string;
+}
+
+// Generate a 6-character game code
+const generateGameCode = (): string => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Excluded confusing chars
+    let code = '';
+    for (let i = 0; i < 6; i++) {
+        code += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return code;
+};
+
+// Generate a unique player ID (stored in localStorage)
+export const getPlayerId = (): string => {
+    let id = localStorage.getItem('chaturanga_player_id');
+    if (!id) {
+        id = 'player_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
+        localStorage.setItem('chaturanga_player_id', id);
+    }
+    return id;
+};
+
+// Create a new game room
+export const createGameRoom = async (): Promise<{ code: string; roomId: string } | null> => {
+    const playerId = getPlayerId();
+    const code = generateGameCode();
+    const initialBoard = createInitialBoard();
+
+    const { data, error } = await supabase
+        .from('games')
+        .insert({
+            code: code,
+            host_id: playerId,
+            guest_id: null,
+            board_state: initialBoard,
+            current_turn: 'white',
+            captured_white: [],
+            captured_black: [],
+            game_over: false,
+            winner: null,
+            in_check: false,
+            status: 'waiting',
+            last_move: null
+        })
+        .select()
+        .single();
+
+    if (error) {
+        console.error('Error creating game:', error);
+        return null;
+    }
+
+    return { code: data.code, roomId: data.id };
+};
+
+// Join an existing game room
+export const joinGameRoom = async (code: string): Promise<{ roomId: string; playerColor: Color } | { error: string }> => {
+    const playerId = getPlayerId();
+
+    // Find the game
+    const { data: game, error: findError } = await supabase
+        .from('games')
+        .select('*')
+        .eq('code', code.toUpperCase())
+        .single();
+
+    if (findError || !game) {
+        return { error: 'Game not found. Check the code and try again.' };
+    }
+
+    // Check if player is already in the game
+    if (game.host_id === playerId) {
+        return { roomId: game.id, playerColor: 'white' };
+    }
+
+    if (game.guest_id === playerId) {
+        return { roomId: game.id, playerColor: 'black' };
+    }
+
+    // Check if game has room
+    if (game.guest_id !== null) {
+        return { error: 'Game is full. Both players already joined.' };
+    }
+
+    // Join as guest
+    const { error: updateError } = await supabase
+        .from('games')
+        .update({ guest_id: playerId, status: 'playing' })
+        .eq('id', game.id);
+
+    if (updateError) {
+        console.error('Error joining game:', updateError);
+        return { error: 'Failed to join game. Please try again.' };
+    }
+
+    return { roomId: game.id, playerColor: 'black' };
+};
+
+// Get game state
+export const getGameState = async (roomId: string): Promise<GameRoom | null> => {
+    const { data, error } = await supabase
+        .from('games')
+        .select('*')
+        .eq('id', roomId)
+        .single();
+
+    if (error) {
+        console.error('Error getting game state:', error);
+        return null;
+    }
+
+    return data as GameRoom;
+};
+
+// Update game state after a move
+export const updateGameState = async (
+    roomId: string,
+    boardState: BoardState,
+    currentTurn: Color,
+    capturedWhite: PieceType[],
+    capturedBlack: PieceType[],
+    gameOver: boolean,
+    winner: Color | 'draw' | null,
+    inCheck: boolean,
+    lastMove: { from: { row: number; col: number }; to: { row: number; col: number } } | null
+): Promise<boolean> => {
+    const { error } = await supabase
+        .from('games')
+        .update({
+            board_state: boardState,
+            current_turn: currentTurn,
+            captured_white: capturedWhite,
+            captured_black: capturedBlack,
+            game_over: gameOver,
+            winner: winner,
+            in_check: inCheck,
+            status: gameOver ? 'finished' : 'playing',
+            last_move: lastMove
+        })
+        .eq('id', roomId);
+
+    if (error) {
+        console.error('Error updating game:', error);
+        return false;
+    }
+
+    return true;
+};
+
+// Subscribe to game changes with presence tracking
+export const subscribeToGame = (
+    roomId: string,
+    onUpdate: (game: GameRoom) => void,
+    onOpponentLeft?: () => void
+): (() => void) => {
+    const playerId = getPlayerId();
+
+    const channel = supabase
+        .channel(`game_${roomId}`)
+        .on(
+            'postgres_changes',
+            {
+                event: 'UPDATE',
+                schema: 'public',
+                table: 'games',
+                filter: `id=eq.${roomId}`
+            },
+            (payload) => {
+                onUpdate(payload.new as GameRoom);
+            }
+        )
+        .on('presence', { event: 'leave' }, ({ leftPresences }) => {
+            // Check if opponent left
+            const opponentLeft = leftPresences.some((p: any) => p.player_id !== playerId);
+            if (opponentLeft && onOpponentLeft) {
+                onOpponentLeft();
+            }
+        })
+        .subscribe(async (status) => {
+            if (status === 'SUBSCRIBED') {
+                await channel.track({ player_id: playerId });
+            }
+        });
+
+    // Return unsubscribe function
+    return () => {
+        supabase.removeChannel(channel);
+    };
+};
+
+// Mark game as abandoned
+export const abandonGame = async (roomId: string, abandonedBy: Color): Promise<boolean> => {
+    const winner = abandonedBy === 'white' ? 'black' : 'white';
+    const { error } = await supabase
+        .from('games')
+        .update({
+            game_over: true,
+            winner: winner,
+            status: 'finished'
+        })
+        .eq('id', roomId);
+
+    if (error) {
+        console.error('Error abandoning game:', error);
+        return false;
+    }
+    return true;
+};
+
+// Check if it's player's turn
+export const isPlayerTurn = (game: GameRoom): boolean => {
+    const playerId = getPlayerId();
+    if (game.current_turn === 'white' && game.host_id === playerId) return true;
+    if (game.current_turn === 'black' && game.guest_id === playerId) return true;
+    return false;
+};
+
+// Get player color
+export const getPlayerColor = (game: GameRoom): Color | null => {
+    const playerId = getPlayerId();
+    if (game.host_id === playerId) return 'white';
+    if (game.guest_id === playerId) return 'black';
+    return null;
+};

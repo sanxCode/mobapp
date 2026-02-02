@@ -1,22 +1,26 @@
 # ♔ Chaturanga ♚
 
-> A unique chess variant featuring the **Chatur** — a new piece that moves diagonally and captures straight! Now with **AI opponent** and a stunning **Indian sacred geometry theme**.
+> A unique chess variant featuring the **Chatur** — a new piece that moves diagonally and captures straight! Now with **AI opponent**, **sound effects**, and a stunning **Indian sacred geometry theme**.
 
-![Version](https://img.shields.io/badge/version-2.0.0-gold)
+![Version](https://img.shields.io/badge/version-2.1.0-gold)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
 ![Vite](https://img.shields.io/badge/Vite-6-646CFF?logo=vite&logoColor=white)
+![PWA](https://img.shields.io/badge/PWA-Installable-blueviolet)
 
 ---
 
-## 🎯 What's New in v2.0
+## 🎯 What's New in v2.1
 
-- 🤖 **AI Opponent** — Play against a smart AI with 3 difficulty levels (Easy, Medium, Hard)
-- 🎨 **Indian Sacred Geometry Theme** — Minimalist 2D pieces inspired by yantras, lotus, trishul symbols
-- 🖼️ **Custom Artwork** — Beautiful board and piece images with gold accents on cream/black
+- 🔊 **Sound Effects** — Authentic wooden chess piece sounds (move, capture, check, victory)
+- ↩️ **Undo/Redo** — Take back moves (smart 2-step for AI mode)
+- 🟡 **Last Move Highlight** — See which squares were involved in the previous move
+- 🎮 **Start Screen** — Beautiful popup to select game mode and difficulty
+- 📱 **PWA Support** — Install as a standalone app on mobile/desktop
+- 🤖 **AI Opponent** — 3 difficulty levels (Easy, Medium, Hard)
+- 🎨 **Indian Sacred Geometry Theme** — Custom artwork with gold accents
 - 👥 **2-Player Mode** — Play locally against a friend
-- ✨ **Premium UI** — Gold shimmer title, smooth animations, and elegant controls
 
 ---
 
@@ -146,10 +150,17 @@ The game starts with an alternating pattern of pawns and chaturs in the second r
 ### User Interface
 - 🎯 Click-to-select piece interaction
 - 💡 Visual move highlighting (gold dots for moves, rings for captures)
+- 🟡 **Last move highlight** — Gold tint on from/to squares
 - ⚠️ Check indicator (pulsing red glow on king)
 - 🔄 Turn indicator showing current player
 - 📊 Captured pieces display
 - 📖 In-game rules modal
+- 🎮 Start screen with game mode selection
+
+### Sound & UX
+- 🔊 **Authentic chess sounds** — Wooden piece move, capture, check, victory
+- ↩️ **Undo/Redo** — Smart 2-step undo in AI mode (undoes your move + AI response)
+- 📱 **PWA Installable** — Add to home screen on mobile, install on desktop
 
 ---
 
@@ -242,6 +253,7 @@ npm run preview
 | `App.tsx` | Main game component with UI |
 | `utils/engine.ts` | Chess logic, move validation, check detection |
 | `utils/ai.ts` | Minimax AI with alpha-beta pruning |
+| `utils/sounds.ts` | Sound effects using Lichess audio |
 | `utils/constants.ts` | Piece symbols and board size |
 | `types.ts` | TypeScript type definitions |
 

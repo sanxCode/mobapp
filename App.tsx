@@ -3,6 +3,7 @@ import { createInitialBoard, getLegalMoves, isKingInCheck, simulateMove, hasAnyL
 import { getBestMove } from './utils/ai';
 import { BOARD_SIZE, PIECE_SYMBOLS } from './utils/constants';
 import { playMoveSound, playCaptureSound, playCheckSound, playVictorySound, playDrawSound, playUndoSound, playRedoSound, playStartSound } from './utils/sounds';
+import { createGameRoom, joinGameRoom, getGameState, updateGameState, subscribeToGame, isPlayerTurn, getPlayerColor, abandonGame, GameRoom } from './utils/multiplayer';
 
 // Helper to get base path for assets
 const getBasePath = () => import.meta.env.BASE_URL || '/';
@@ -20,10 +21,20 @@ const AI_DELAY_MS = 500;
 
 export default function App() {
   // Game Configuration
-  const [gameMode, setGameMode] = useState<'pvc' | 'pvp'>('pvc'); // Player vs Computer, Player vs Player
+  const [gameMode, setGameMode] = useState<'pvc' | 'pvp' | 'online'>('pvc'); // Player vs Computer, Player vs Player, Online
   const [aiDifficulty, setAiDifficulty] = useState<number>(3); // Search depth
   const [showRules, setShowRules] = useState(false);
   const [showStartScreen, setShowStartScreen] = useState(true); // Show start popup on load
+
+  // Multiplayer State
+  const [roomId, setRoomId] = useState<string | null>(null);
+  const [roomCode, setRoomCode] = useState<string>('');
+  const [playerColor, setPlayerColor] = useState<Color | null>(null);
+  const [waitingForOpponent, setWaitingForOpponent] = useState(false);
+  const [joinCodeInput, setJoinCodeInput] = useState('');
+  const [multiplayerError, setMultiplayerError] = useState<string | null>(null);
+  const [onlineSubscreen, setOnlineSubscreen] = useState<'menu' | 'create' | 'join'>('menu');
+  const [opponentLeft, setOpponentLeft] = useState(false);
 
   // Game State
   const [gameState, setGameState] = useState<GameState>(() => ({
@@ -73,8 +84,119 @@ export default function App() {
     setFuture([]);
     setLastMove(null);
     setShowStartScreen(false);
+    setRoomId(null);
+    setRoomCode('');
+    setPlayerColor(null);
+    setWaitingForOpponent(false);
+    setOpponentLeft(false);
     playStartSound();
   };
+
+  // Create online game room
+  const handleCreateGame = async () => {
+    setMultiplayerError(null);
+    const result = await createGameRoom();
+    if (result) {
+      setRoomId(result.roomId);
+      setRoomCode(result.code);
+      setPlayerColor('white');
+      setWaitingForOpponent(true);
+      setGameMode('online');
+    } else {
+      setMultiplayerError('Failed to create game. Please try again.');
+    }
+  };
+
+  // Join online game room
+  const handleJoinGame = async () => {
+    if (!joinCodeInput.trim()) {
+      setMultiplayerError('Please enter a game code.');
+      return;
+    }
+    setMultiplayerError(null);
+    const result = await joinGameRoom(joinCodeInput.trim());
+    if ('error' in result) {
+      setMultiplayerError(result.error);
+    } else {
+      setRoomId(result.roomId);
+      setPlayerColor(result.playerColor);
+      setGameMode('online');
+      setWaitingForOpponent(false);
+      setShowStartScreen(false);
+      // Fetch initial game state
+      const game = await getGameState(result.roomId);
+      if (game) {
+        setGameState({
+          board: game.board_state,
+          turn: game.current_turn,
+          selectedSquare: null,
+          validMoves: [],
+          gameOver: game.game_over,
+          winner: game.winner,
+          check: game.in_check,
+          capturedWhite: game.captured_white,
+          capturedBlack: game.captured_black,
+          promotionPending: null
+        });
+        setLastMove(game.last_move);
+        setRoomCode(game.code);
+      }
+      playStartSound();
+    }
+  };
+
+  // Subscribe to online game updates
+  useEffect(() => {
+    if (gameMode !== 'online' || !roomId) return;
+
+    const unsubscribe = subscribeToGame(
+      roomId,
+      (game: GameRoom) => {
+        // Check if opponent joined
+        if (waitingForOpponent && game.guest_id) {
+          setWaitingForOpponent(false);
+          setShowStartScreen(false);
+          playStartSound();
+        }
+
+        // Update game state from server
+        setGameState({
+          board: game.board_state,
+          turn: game.current_turn,
+          selectedSquare: null,
+          validMoves: [],
+          gameOver: game.game_over,
+          winner: game.winner,
+          check: game.in_check,
+          capturedWhite: game.captured_white,
+          capturedBlack: game.captured_black,
+          promotionPending: null
+        });
+        setLastMove(game.last_move);
+
+        // Play sounds
+        if (game.game_over) {
+          if (game.winner === 'draw') playDrawSound();
+          else playVictorySound();
+        } else if (game.in_check) {
+          playCheckSound();
+        }
+      },
+      // Opponent left callback
+      () => {
+        if (!gameState.gameOver) {
+          setOpponentLeft(true);
+          // Mark game as won by remaining player
+          if (playerColor) {
+            const opponentColor = playerColor === 'white' ? 'black' : 'white';
+            abandonGame(roomId, opponentColor);
+          }
+        }
+      }
+    );
+
+    return () => unsubscribe();
+  }, [gameMode, roomId, waitingForOpponent, gameState.gameOver, playerColor]);
 
   // Undo last move (in AI mode, undo 2 moves to skip AI's turn)
   const undoMove = () => {
@@ -132,6 +254,7 @@ export default function App() {
   const handleSquareClick = (row: number, col: number) => {
     if (gameState.gameOver || gameState.promotionPending) return;
     if (gameMode === 'pvc' && gameState.turn === AI_COLOR) return; // Prevent clicking during AI turn
+    if (gameMode === 'online' && gameState.turn !== playerColor) return; // Prevent clicking during opponent's turn
 
     const { selectedSquare, validMoves, board, turn } = gameState;
     const clickedPiece = board[row][col];
@@ -263,6 +386,21 @@ export default function App() {
       capturedBlack: capBlack,
       promotionPending: null
     });
+
+    // Sync with Supabase if online game
+    if (gameMode === 'online' && roomId) {
+      updateGameState(
+        roomId,
+        newBoard,
+        nextTurn,
+        capWhite,
+        capBlack,
+        isOver,
+        winner,
+        inCheck,
+        lastMove
+      );
+    }
   };
 
   // --- AI Effect ---
@@ -310,7 +448,9 @@ export default function App() {
         </h1>
         <div className="flex items-center justify-center gap-4">
           <p className="text-[#b8860b] font-light">
-            {gameMode === 'pvc' ? `Human vs AI (Level ${aiDifficulty})` : 'Player vs Player'}
+            {gameMode === 'pvc' ? `Human vs AI (Level ${aiDifficulty})` :
+              gameMode === 'online' ? `Online Game • ${roomCode} • You: ${playerColor === 'white' ? '⚪' : '⚫'}` :
+                'Player vs Player'}
           </p>
           <button
             onClick={openStartScreen}
@@ -363,6 +503,13 @@ export default function App() {
         </div>
       )}
 
+      {/* Opponent Left Alert */}
+      {opponentLeft && (
+        <div className="bg-green-600/20 border border-green-500/50 text-green-200 px-4 py-2 rounded-lg">
+          🏆 Opponent disconnected - You win!
+        </div>
+      )}
+
       {/* Board */}
       <div className={`relative ${gameState.gameOver && gameState.winner && gameState.winner !== 'draw' ? 'victory-board' : ''}`}>
         {/* Board with background image */}
@@ -377,55 +524,63 @@ export default function App() {
         >
           {/* Grid overlay */}
           <div className="grid grid-cols-8 grid-rows-8 w-full h-full">
-            {gameState.board.map((rowArr, r) =>
-              rowArr.map((piece, c) => {
-                const isSelected = gameState.selectedSquare?.row === r && gameState.selectedSquare?.col === c;
-                const isValidMove = gameState.validMoves.some(m => m.row === r && m.col === c);
-                const isCapture = isValidMove && piece !== null;
-                const isKingChecked = gameState.check && piece?.type === PieceType.KING && piece?.color === gameState.turn;
-                const isLastMoveFrom = lastMove?.from.row === r && lastMove?.from.col === c;
-                const isLastMoveTo = lastMove?.to.row === r && lastMove?.to.col === c;
+            {/* Flip board for black player in online mode */}
+            {(() => {
+              const shouldFlip = gameMode === 'online' && playerColor === 'black';
+              const rows = shouldFlip ? [...Array(8).keys()].reverse() : [...Array(8).keys()];
+              const cols = shouldFlip ? [...Array(8).keys()].reverse() : [...Array(8).keys()];
 
-                return (
-                  <div
-                    key={`${r}-${c}`}
-                    onClick={() => handleSquareClick(r, c)}
-                    className={`
+              return rows.map(r =>
+                cols.map(c => {
+                  const piece = gameState.board[r][c];
+                  const isSelected = gameState.selectedSquare?.row === r && gameState.selectedSquare?.col === c;
+                  const isValidMove = gameState.validMoves.some(m => m.row === r && m.col === c);
+                  const isCapture = isValidMove && piece !== null;
+                  const isKingChecked = gameState.check && piece?.type === PieceType.KING && piece?.color === gameState.turn;
+                  const isLastMoveFrom = lastMove?.from.row === r && lastMove?.from.col === c;
+                  const isLastMoveTo = lastMove?.to.row === r && lastMove?.to.col === c;
+
+                  return (
+                    <div
+                      key={`${r}-${c}`}
+                      onClick={() => handleSquareClick(r, c)}
+                      className={`
                       relative flex items-center justify-center cursor-pointer select-none
                       ${isLastMoveFrom || isLastMoveTo ? 'bg-[#b8860b]/30' : 'bg-transparent'}
                       ${isSelected ? 'ring-inset ring-3 ring-[#d4a574]' : ''}
                       ${isKingChecked ? 'check-square' : ''}
                       transition-all duration-150
                     `}
-                  >
-                    {/* Valid Move Marker */}
-                    {isValidMove && !isCapture && (
-                      <div className="absolute w-4 h-4 valid-move-dot rounded-full" />
-                    )}
-                    {/* Capture Marker */}
-                    {isCapture && (
-                      <div className="absolute inset-1 capture-highlight" />
-                    )}
+                    >
+                      {/* Valid Move Marker */}
+                      {isValidMove && !isCapture && (
+                        <div className="absolute w-4 h-4 valid-move-dot rounded-full" />
+                      )}
+                      {/* Capture Marker */}
+                      {isCapture && (
+                        <div className="absolute inset-1 capture-highlight" />
+                      )}
 
-                    {/* Piece as image */}
-                    {piece && (
-                      <img
-                        src={getPieceImage(piece.color, piece.type)}
-                        alt={`${piece.color} ${piece.type}`}
-                        className={`
+                      {/* Piece as image */}
+                      {piece && (
+                        <img
+                          src={getPieceImage(piece.color, piece.type)}
+                          alt={`${piece.color} ${piece.type}`}
+                          className={`
                           z-10 transition-transform duration-200 w-[85%] h-[85%] object-contain
                           ${isSelected ? 'scale-110' : 'hover:scale-105'}
                         `}
-                        style={{
-                          filter: 'drop-shadow(0 2px 3px rgba(0,0,0,0.4))'
-                        }}
-                        draggable={false}
-                      />
-                    )}
-                  </div>
-                );
-              })
-            )}
+                          style={{
+                            filter: 'drop-shadow(0 2px 3px rgba(0,0,0,0.4))'
+                          }}
+                          draggable={false}
+                        />
+                      )}
+                    </div>
+                  );
+                })
+              );
+            })()}
           </div>
         </div>
       </div>
@@ -438,58 +593,155 @@ export default function App() {
             <h1 className="text-4xl font-cinzel font-bold title-shimmer mb-2">Chaturanga</h1>
             <p className="text-[#b8860b]/70 text-sm mb-8">Ancient Chess Reimagined</p>
 
-            {/* Game Mode Selection */}
-            <div className="mb-6">
-              <p className="text-[#f5e6c8] text-sm mb-3">Select Game Mode</p>
-              <div className="flex gap-3 justify-center">
-                <button
-                  onClick={() => setGameMode('pvc')}
-                  className={`px-6 py-3 rounded-lg font-semibold transition-all ${gameMode === 'pvc' ? 'bg-[#b8860b] text-[#1a1814]' : 'bg-[#2d2a24] text-[#f5e6c8] border border-[#b8860b]/30 hover:border-[#b8860b]'}`}
-                >
-                  🤖 Vs AI
-                </button>
-                <button
-                  onClick={() => setGameMode('pvp')}
-                  className={`px-6 py-3 rounded-lg font-semibold transition-all ${gameMode === 'pvp' ? 'bg-[#b8860b] text-[#1a1814]' : 'bg-[#2d2a24] text-[#f5e6c8] border border-[#b8860b]/30 hover:border-[#b8860b]'}`}
-                >
-                  👥 2 Player
-                </button>
-              </div>
-            </div>
-
-            {/* AI Difficulty (only if vs AI) */}
-            {gameMode === 'pvc' && (
-              <div className="mb-6">
-                <p className="text-[#f5e6c8] text-sm mb-3">AI Difficulty</p>
-                <div className="flex gap-2 justify-center">
-                  {[{ val: 2, label: 'Easy' }, { val: 3, label: 'Medium' }, { val: 4, label: 'Hard' }].map(d => (
-                    <button
-                      key={d.val}
-                      onClick={() => setAiDifficulty(d.val)}
-                      className={`px-4 py-2 rounded-lg text-sm transition-all ${aiDifficulty === d.val ? 'bg-[#b8860b] text-[#1a1814] font-bold' : 'bg-[#2d2a24] text-[#f5e6c8] border border-[#b8860b]/30 hover:border-[#b8860b]'}`}
-                    >
-                      {d.label}
-                    </button>
-                  ))}
+            {/* Waiting for opponent screen */}
+            {waitingForOpponent ? (
+              <div className="space-y-6">
+                <div className="animate-pulse text-[#f5e6c8]">
+                  <p className="text-lg mb-2">Waiting for opponent...</p>
+                  <p className="text-sm text-[#b8860b]/70">Share this code with a friend:</p>
                 </div>
+                <div className="bg-[#2d2a24] p-4 rounded-xl border border-[#b8860b]">
+                  <p className="text-3xl font-mono font-bold text-[#d4a574] tracking-widest">{roomCode}</p>
+                </div>
+                <button
+                  onClick={() => navigator.clipboard.writeText(roomCode)}
+                  className="text-[#b8860b] hover:text-[#d4a574] text-sm"
+                >
+                  📋 Copy Code
+                </button>
+                <button
+                  onClick={() => { setWaitingForOpponent(false); setRoomId(null); setOnlineSubscreen('menu'); }}
+                  className="block mx-auto text-red-400/70 hover:text-red-400 text-sm mt-4"
+                >
+                  ✕ Cancel
+                </button>
               </div>
+            ) : onlineSubscreen !== 'menu' && gameMode === 'online' ? (
+              /* Online Create/Join screens */
+              <div className="space-y-6">
+                {onlineSubscreen === 'create' && (
+                  <>
+                    <p className="text-[#f5e6c8]">Create a new game and share the code</p>
+                    <button
+                      onClick={handleCreateGame}
+                      className="w-full py-4 bg-gradient-to-r from-[#b8860b] to-[#d4a574] text-[#1a1814] rounded-xl font-bold text-lg hover:scale-[1.02] transition-all shadow-lg"
+                    >
+                      🎲 Create Game
+                    </button>
+                  </>
+                )}
+                {onlineSubscreen === 'join' && (
+                  <>
+                    <p className="text-[#f5e6c8]">Enter the game code from your friend</p>
+                    <input
+                      type="text"
+                      value={joinCodeInput}
+                      onChange={(e) => setJoinCodeInput(e.target.value.toUpperCase())}
+                      placeholder="XXXXXX"
+                      className="w-full p-4 bg-[#2d2a24] border border-[#b8860b]/50 rounded-xl text-center text-2xl font-mono text-[#f5e6c8] tracking-widest placeholder-[#b8860b]/30 focus:border-[#b8860b] focus:outline-none"
+                      maxLength={6}
+                    />
+                    {multiplayerError && (
+                      <p className="text-red-400 text-sm">{multiplayerError}</p>
+                    )}
+                    <button
+                      onClick={handleJoinGame}
+                      className="w-full py-4 bg-gradient-to-r from-[#b8860b] to-[#d4a574] text-[#1a1814] rounded-xl font-bold text-lg hover:scale-[1.02] transition-all shadow-lg"
+                    >
+                      🎮 Join Game
+                    </button>
+                  </>
+                )}
+                <button
+                  onClick={() => setOnlineSubscreen('menu')}
+                  className="text-[#b8860b]/70 hover:text-[#d4a574] text-sm"
+                >
+                  ← Back
+                </button>
+              </div>
+            ) : (
+              /* Main menu */
+              <>
+                {/* Game Mode Selection */}
+                <div className="mb-6">
+                  <p className="text-[#f5e6c8] text-sm mb-3">Select Game Mode</p>
+                  <div className="flex flex-wrap gap-3 justify-center">
+                    <button
+                      onClick={() => setGameMode('pvc')}
+                      className={`px-5 py-3 rounded-lg font-semibold transition-all ${gameMode === 'pvc' ? 'bg-[#b8860b] text-[#1a1814]' : 'bg-[#2d2a24] text-[#f5e6c8] border border-[#b8860b]/30 hover:border-[#b8860b]'}`}
+                    >
+                      🤖 Vs AI
+                    </button>
+                    <button
+                      onClick={() => setGameMode('pvp')}
+                      className={`px-5 py-3 rounded-lg font-semibold transition-all ${gameMode === 'pvp' ? 'bg-[#b8860b] text-[#1a1814]' : 'bg-[#2d2a24] text-[#f5e6c8] border border-[#b8860b]/30 hover:border-[#b8860b]'}`}
+                    >
+                      👥 Local
+                    </button>
+                    <button
+                      onClick={() => setGameMode('online')}
+                      className={`px-5 py-3 rounded-lg font-semibold transition-all ${gameMode === 'online' ? 'bg-[#b8860b] text-[#1a1814]' : 'bg-[#2d2a24] text-[#f5e6c8] border border-[#b8860b]/30 hover:border-[#b8860b]'}`}
+                    >
+                      🌐 Online
+                    </button>
+                  </div>
+                </div>
+
+                {/* AI Difficulty (only if vs AI) */}
+                {gameMode === 'pvc' && (
+                  <div className="mb-6">
+                    <p className="text-[#f5e6c8] text-sm mb-3">AI Difficulty</p>
+                    <div className="flex gap-2 justify-center">
+                      {[{ val: 2, label: 'Easy' }, { val: 3, label: 'Medium' }, { val: 4, label: 'Hard' }].map(d => (
+                        <button
+                          key={d.val}
+                          onClick={() => setAiDifficulty(d.val)}
+                          className={`px-4 py-2 rounded-lg text-sm transition-all ${aiDifficulty === d.val ? 'bg-[#b8860b] text-[#1a1814] font-bold' : 'bg-[#2d2a24] text-[#f5e6c8] border border-[#b8860b]/30 hover:border-[#b8860b]'}`}
+                        >
+                          {d.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Online Options */}
+                {gameMode === 'online' && (
+                  <div className="mb-6 space-y-3">
+                    <button
+                      onClick={() => setOnlineSubscreen('create')}
+                      className="w-full py-3 bg-[#2d2a24] text-[#f5e6c8] rounded-lg border border-[#b8860b]/30 hover:border-[#b8860b] transition-all"
+                    >
+                      🎲 Create New Game
+                    </button>
+                    <button
+                      onClick={() => setOnlineSubscreen('join')}
+                      className="w-full py-3 bg-[#2d2a24] text-[#f5e6c8] rounded-lg border border-[#b8860b]/30 hover:border-[#b8860b] transition-all"
+                    >
+                      🎮 Join Game
+                    </button>
+                  </div>
+                )}
+
+                {/* Start Button (for local modes only) */}
+                {gameMode !== 'online' && (
+                  <button
+                    onClick={startGame}
+                    className="w-full py-4 bg-gradient-to-r from-[#b8860b] to-[#d4a574] text-[#1a1814] rounded-xl font-bold text-lg hover:scale-[1.02] transition-all shadow-lg mb-4"
+                  >
+                    ▶ Start Game
+                  </button>
+                )}
+
+                {/* Rules Link */}
+                <button
+                  onClick={() => { setShowStartScreen(false); setShowRules(true); }}
+                  className="text-[#b8860b]/70 hover:text-[#d4a574] text-sm transition-colors"
+                >
+                  📖 View Rules
+                </button>
+              </>
             )}
-
-            {/* Start Button */}
-            <button
-              onClick={startGame}
-              className="w-full py-4 bg-gradient-to-r from-[#b8860b] to-[#d4a574] text-[#1a1814] rounded-xl font-bold text-lg hover:scale-[1.02] transition-all shadow-lg mb-4"
-            >
-              ▶ Start Game
-            </button>
-
-            {/* Rules Link */}
-            <button
-              onClick={() => { setShowStartScreen(false); setShowRules(true); }}
-              className="text-[#b8860b]/70 hover:text-[#d4a574] text-sm transition-colors"
-            >
-              📖 View Rules
-            </button>
           </div>
         </div>
       )}
