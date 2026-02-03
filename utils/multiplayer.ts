@@ -170,10 +170,13 @@ export const updateGameState = async (
 // Subscribe to game changes with presence tracking
 export const subscribeToGame = (
     roomId: string,
+    _opponentId: string | null, // Kept for API compatibility but not used
     onUpdate: (game: GameRoom) => void,
     onOpponentLeft?: () => void
 ): (() => void) => {
     const playerId = getPlayerId();
+    let otherPlayersCount = 0;
+    let gameStarted = false;
 
     const channel = supabase
         .channel(`game_${roomId}`)
@@ -186,12 +189,35 @@ export const subscribeToGame = (
                 filter: `id=eq.${roomId}`
             },
             (payload) => {
-                onUpdate(payload.new as GameRoom);
+                const game = payload.new as GameRoom;
+                // Track when game has actually started (both players joined)
+                if (game.guest_id && game.host_id) {
+                    gameStarted = true;
+                }
+                onUpdate(game);
             }
         )
+        .on('presence', { event: 'sync' }, () => {
+            // Count other players currently present
+            const state = channel.presenceState();
+            let count = 0;
+            Object.values(state).forEach((presences: any) => {
+                presences.forEach((p: any) => {
+                    if (p.player_id !== playerId) {
+                        count++;
+                    }
+                });
+            });
+            otherPlayersCount = count;
+        })
         .on('presence', { event: 'leave' }, ({ leftPresences }) => {
-            // Check if opponent left
+            // Only trigger if game has started
+            if (!gameStarted) return;
+
+            // Check if any of the leaving presences is NOT us (i.e., opponent left)
             const opponentLeft = leftPresences.some((p: any) => p.player_id !== playerId);
+
+            // Trigger if opponent left (regardless of current count - leave happens before sync updates count)
             if (opponentLeft && onOpponentLeft) {
                 onOpponentLeft();
             }

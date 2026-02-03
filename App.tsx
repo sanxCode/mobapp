@@ -19,6 +19,456 @@ import { BoardState, Color, GameState, Move, PieceType, Position } from './types
 const AI_COLOR: Color = 'black';
 const AI_DELAY_MS = 500;
 
+// ============== Interactive Chatur Tutorial Component ==============
+interface TutorialStep {
+  title: string;
+  description: string;
+  board: (string | null)[][]; // 5x5 mini board
+  highlights: { row: number; col: number; type: 'move' | 'capture' | 'piece' | 'arrow' }[];
+  pieceMove?: { from: { row: number; col: number }; to: { row: number; col: number } };
+  showArrow?: boolean; // Whether to show the directional arrow
+}
+
+const ChaturTutorialModal: React.FC<{
+  onClose: () => void;
+  getPieceImage: (color: string, type: string) => string;
+}> = ({ onClose, getPieceImage }) => {
+  const [currentStep, setCurrentStep] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(true);
+  const [animationPhase, setAnimationPhase] = useState(0);
+  const [isTransitioning, setIsTransitioning] = useState(false);
+
+  // Tutorial steps with mini-board configurations
+  const tutorialSteps: TutorialStep[] = [
+    {
+      title: "Meet the Chatur",
+      description: "The Chatur is a new piece that moves differently from any other!",
+      board: [
+        [null, null, null, null, null],
+        [null, null, null, null, null],
+        [null, null, 'wc', null, null],
+        [null, null, null, null, null],
+        [null, null, null, null, null],
+      ],
+      highlights: [{ row: 2, col: 2, type: 'piece' }],
+    },
+    {
+      title: "Movement: Diagonal Forward",
+      description: "The Chatur moves DIAGONALLY forward — one square at a time.",
+      board: [
+        [null, null, null, null, null],
+        [null, null, null, null, null],
+        [null, null, null, null, null],
+        [null, null, 'wc', null, null],
+        [null, null, null, null, null],
+      ],
+      highlights: [
+        { row: 3, col: 2, type: 'piece' },
+        { row: 2, col: 1, type: 'move' },
+        { row: 2, col: 3, type: 'move' },
+      ],
+      pieceMove: { from: { row: 3, col: 2 }, to: { row: 2, col: 3 } },
+      showArrow: false,
+    },
+    {
+      title: "First Move: Double Diagonal",
+      description: "On its FIRST move, the Chatur can jump 2 squares diagonally!",
+      board: [
+        [null, null, null, null, null],
+        [null, null, null, null, null],
+        [null, null, null, null, null],
+        [null, null, null, null, null],
+        [null, null, 'wc', null, null],
+      ],
+      highlights: [
+        { row: 4, col: 2, type: 'piece' },
+        { row: 3, col: 1, type: 'move' },
+        { row: 3, col: 3, type: 'move' },
+        { row: 2, col: 0, type: 'move' },
+        { row: 2, col: 4, type: 'move' },
+      ],
+      pieceMove: { from: { row: 4, col: 2 }, to: { row: 2, col: 4 } },
+      showArrow: false,
+    },
+    {
+      title: "Capture: Straight Forward",
+      description: "The Chatur captures STRAIGHT forward — the opposite of how it moves!",
+      board: [
+        [null, null, null, null, null],
+        [null, null, null, null, null],
+        [null, null, 'bp', null, null],
+        [null, null, 'wc', null, null],
+        [null, null, null, null, null],
+      ],
+      highlights: [
+        { row: 3, col: 2, type: 'piece' },
+        { row: 2, col: 2, type: 'capture' },
+      ],
+      pieceMove: { from: { row: 3, col: 2 }, to: { row: 2, col: 2 } },
+    },
+    {
+      title: "Compare: Pawn vs Chatur",
+      description: "Pawn moves STRAIGHT, captures DIAGONAL. Chatur is the OPPOSITE!",
+      board: [
+        [null, null, null, null, null],
+        [null, null, null, null, null],
+        [null, null, null, null, null],
+        [null, 'wp', null, 'wc', null],
+        [null, null, null, null, null],
+      ],
+      highlights: [
+        { row: 3, col: 1, type: 'piece' },
+        { row: 3, col: 3, type: 'piece' },
+        { row: 2, col: 1, type: 'move' }, // Pawn moves straight
+        { row: 2, col: 2, type: 'move' }, // Chatur moves diagonal
+        { row: 2, col: 4, type: 'move' }, // Chatur moves diagonal other side
+      ],
+    },
+    {
+      title: "Board Position",
+      description: "Chaturs alternate with Pawns: columns b, d, f, h have Chaturs!",
+      board: [
+        [null, null, null, null, null],
+        [null, null, null, null, null],
+        [null, null, null, null, null],
+        [null, null, null, null, null],
+        ['wp', 'wc', 'wp', 'wc', 'wp'],
+      ],
+      highlights: [
+        { row: 4, col: 1, type: 'piece' },
+        { row: 4, col: 3, type: 'piece' },
+      ],
+    },
+    {
+      title: "Standard Chess Rules",
+      description: "Everything else follows normal chess! King, Queen, Rook, Bishop, Knight, and Pawn move as usual. Win by Checkmate!",
+      board: [
+        ['br', 'bn', 'bb', 'bq', 'bk'],
+        [null, null, null, null, null],
+        [null, null, null, null, null],
+        [null, null, null, null, null],
+        ['wr', 'wn', 'wb', 'wq', 'wk'],
+      ],
+      highlights: [],
+    },
+  ];
+
+  // Animation phase timer (5 phases for richer animations)
+  useEffect(() => {
+    if (!isPlaying) return;
+
+    const timer = setInterval(() => {
+      setAnimationPhase(prev => (prev + 1) % 5);
+    }, 500);
+
+    return () => clearInterval(timer);
+  }, [isPlaying]);
+
+  // Auto-advance steps with smooth transition
+  useEffect(() => {
+    if (!isPlaying) return;
+
+    const stepTimer = setInterval(() => {
+      setIsTransitioning(true);
+      setTimeout(() => {
+        setCurrentStep(prev => (prev + 1) % tutorialSteps.length);
+        setAnimationPhase(0);
+        setTimeout(() => setIsTransitioning(false), 100);
+      }, 300);
+    }, 5000);
+
+    return () => clearInterval(stepTimer);
+  }, [isPlaying, tutorialSteps.length]);
+
+  // Calculate piece movement offset for slide animation
+  const getPieceMoveOffset = (r: number, c: number) => {
+    const pieceMove = currentTutorial.pieceMove;
+    if (!pieceMove) return { x: 0, y: 0 };
+    if (pieceMove.from.row !== r || pieceMove.from.col !== c) return { x: 0, y: 0 };
+
+    const dx = (pieceMove.to.col - pieceMove.from.col) * 51.2;
+    const dy = (pieceMove.to.row - pieceMove.from.row) * 51.2;
+
+    // Check if it's a single-step move (1 square diagonal)
+    const isSingleStep = Math.abs(pieceMove.to.row - pieceMove.from.row) === 1;
+
+    if (animationPhase >= 3) {
+      if (isSingleStep) {
+        // Single-step: move in one smooth motion at phase 3+
+        return { x: dx, y: dy };
+      } else {
+        // Double-step (2 squares): show mid-point progress
+        const progress = animationPhase === 3 ? 0.5 : 1;
+        return { x: dx * progress, y: dy * progress };
+      }
+    }
+    return { x: 0, y: 0 };
+  };
+
+  const currentTutorial = tutorialSteps[currentStep];
+
+  const renderMiniBoard = () => {
+    const board = currentTutorial.board;
+    const highlights = currentTutorial.highlights;
+
+    return (
+      <div
+        className={`relative grid grid-cols-5 gap-0 w-64 h-64 mx-auto rounded-lg overflow-visible border-2 border-[#b8860b] shadow-2xl transition-all duration-300 ${isTransitioning ? 'opacity-0 scale-95' : 'opacity-100 scale-100'}`}
+        style={{ boxShadow: '0 0 30px rgba(184, 134, 11, 0.3)' }}
+      >
+        {board.map((row, r) =>
+          row.map((cell, c) => {
+            const isLight = (r + c) % 2 === 0;
+            const highlight = highlights.find(h => h.row === r && h.col === c);
+            const highlightType = highlight?.type;
+            const moveOffset = getPieceMoveOffset(r, c);
+
+            // Determine piece to show
+            let pieceColor = '';
+            let pieceType = '';
+            if (cell) {
+              pieceColor = cell[0] === 'w' ? 'white' : 'black';
+              const typeChar = cell[1];
+              const typeMap: { [key: string]: string } = {
+                'c': 'chatur', 'p': 'pawn', 'r': 'rook',
+                'n': 'knight', 'b': 'bishop', 'q': 'queen', 'k': 'king',
+              };
+              pieceType = typeMap[typeChar] || 'pawn';
+            }
+
+            // Sequential animation for move dots
+            const moveIndex = highlights.filter(h => h.type === 'move').findIndex(h => h.row === r && h.col === c);
+            const isActiveMove = highlightType === 'move' && (animationPhase >= (moveIndex % 3) + 1);
+
+            return (
+              <div
+                key={`${r}-${c}`}
+                className={`relative flex items-center justify-center overflow-visible ${isLight ? 'bg-[#f0d9b5]' : 'bg-[#b58863]'} transition-all duration-200`}
+                style={{ width: '51.2px', height: '51.2px' }}
+              >
+                {/* Glow background for highlighted pieces */}
+                {highlightType === 'piece' && (
+                  <div
+                    className="absolute inset-0 transition-opacity duration-300"
+                    style={{
+                      background: `radial-gradient(circle, rgba(212, 165, 116, ${animationPhase % 2 === 0 ? 0.5 : 0.2}) 0%, transparent 70%)`,
+                    }}
+                  />
+                )}
+
+                {/* Move indicator with ripple effect */}
+                {highlightType === 'move' && (
+                  <>
+                    <div
+                      className="absolute rounded-full bg-[#b8860b]/30 transition-all"
+                      style={{
+                        width: isActiveMove ? '28px' : '0px',
+                        height: isActiveMove ? '28px' : '0px',
+                        opacity: isActiveMove ? 0.6 : 0,
+                        transitionDuration: '400ms',
+                        transitionDelay: `${moveIndex * 80}ms`,
+                      }}
+                    />
+                    <div
+                      className="absolute rounded-full bg-[#d4a574] shadow-lg transition-all"
+                      style={{
+                        width: isActiveMove ? '14px' : '6px',
+                        height: isActiveMove ? '14px' : '6px',
+                        opacity: 0.95,
+                        transitionDuration: '300ms',
+                        transitionDelay: `${moveIndex * 80}ms`,
+                        boxShadow: isActiveMove ? '0 0 12px rgba(212, 165, 116, 0.9)' : 'none',
+                      }}
+                    />
+                  </>
+                )}
+
+                {/* Capture indicator with pulsing crosshair */}
+                {highlightType === 'capture' && (
+                  <>
+                    <div
+                      className="absolute inset-0 transition-all"
+                      style={{
+                        boxShadow: animationPhase % 2 === 0
+                          ? 'inset 0 0 18px rgba(239, 68, 68, 0.7)'
+                          : 'inset 0 0 10px rgba(239, 68, 68, 0.4)',
+                        transitionDuration: '300ms',
+                      }}
+                    />
+                    <div
+                      className="absolute rounded-full border-4 border-red-500 transition-all"
+                      style={{
+                        width: animationPhase % 2 === 0 ? '38px' : '32px',
+                        height: animationPhase % 2 === 0 ? '38px' : '32px',
+                        transitionDuration: '300ms',
+                      }}
+                    />
+                    <div className="absolute w-7 h-0.5 bg-red-500/70" />
+                    <div className="absolute w-0.5 h-7 bg-red-500/70" />
+                  </>
+                )}
+
+                {/* Piece image with slide animation */}
+                {cell && (
+                  <img
+                    src={getPieceImage(pieceColor, pieceType)}
+                    alt={`${pieceColor} ${pieceType}`}
+                    className="w-10 h-10 object-contain z-20 transition-all"
+                    style={{
+                      transform: `translate(${moveOffset.x}px, ${moveOffset.y}px) scale(${highlightType === 'piece' && animationPhase % 2 === 0 ? 1.12 : 1})`,
+                      transitionDuration: moveOffset.x !== 0 || moveOffset.y !== 0 ? '400ms' : '200ms',
+                      transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+                      filter: highlightType === 'piece'
+                        ? `drop-shadow(0 0 ${animationPhase % 2 === 0 ? '14px' : '8px'} rgba(212, 165, 116, 0.9))`
+                        : 'drop-shadow(0 2px 3px rgba(0,0,0,0.4))',
+                    }}
+                  />
+                )}
+              </div>
+            );
+          })
+        )}
+
+        {/* Arrow overlay for movement direction */}
+        {currentTutorial.pieceMove && currentTutorial.showArrow !== false && animationPhase < 3 && (
+          <svg className="absolute inset-0 w-full h-full pointer-events-none z-30" style={{ opacity: animationPhase === 2 ? 1 : 0.7 }}>
+            <defs>
+              <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                <polygon points="0 0, 10 3.5, 0 7" fill="#d4a574" />
+              </marker>
+            </defs>
+            <line
+              x1={(currentTutorial.pieceMove.from.col + 0.5) * 51.2}
+              y1={(currentTutorial.pieceMove.from.row + 0.5) * 51.2}
+              x2={(currentTutorial.pieceMove.to.col + 0.5) * 51.2 - 8}
+              y2={(currentTutorial.pieceMove.to.row + 0.5) * 51.2 - 8}
+              stroke="#d4a574"
+              strokeWidth="3"
+              markerEnd="url(#arrowhead)"
+              strokeDasharray="6,4"
+              className="animate-pulse"
+            />
+          </svg>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-[#1a1814] border-2 border-[#b8860b] rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto shadow-2xl"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex justify-between items-center p-4 border-b border-[#b8860b]/30">
+          <h2 className="text-2xl font-cinzel text-[#d4a574]">How to Play</h2>
+          <button
+            onClick={onClose}
+            className="text-[#b8860b] hover:text-[#d4a574] text-2xl transition-colors"
+          >
+            &times;
+          </button>
+        </div>
+
+        {/* Tutorial Content */}
+        <div className="p-6 space-y-6">
+          {/* Step indicator */}
+          <div className="flex justify-center gap-2">
+            {tutorialSteps.map((_, i) => (
+              <button
+                key={i}
+                onClick={() => { setCurrentStep(i); setIsPlaying(false); }}
+                className={`w-3 h-3 rounded-full transition-all duration-300 ${i === currentStep
+                  ? 'bg-[#d4a574] scale-125'
+                  : 'bg-[#2d2a24] hover:bg-[#b8860b]/50'
+                  }`}
+              />
+            ))}
+          </div>
+
+          {/* Title */}
+          <div className="text-center">
+            <h3 className="text-xl font-bold text-[#f5e6c8] mb-2">
+              {currentTutorial.title}
+            </h3>
+            <p className="text-[#b8860b] text-sm">
+              {currentTutorial.description}
+            </p>
+          </div>
+
+          {/* Mini Board */}
+          {renderMiniBoard()}
+
+          {/* Legend */}
+          <div className="flex justify-center gap-6 text-xs text-[#f5e6c8]/70">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-[#b8860b]" />
+              <span>Move</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full border-2 border-red-500" />
+              <span>Capture</span>
+            </div>
+          </div>
+
+          {/* Controls */}
+          <div className="flex justify-center gap-4">
+            <button
+              onClick={() => setCurrentStep(prev => (prev - 1 + tutorialSteps.length) % tutorialSteps.length)}
+              className="px-4 py-2 bg-[#2d2a24] text-[#f5e6c8] rounded-lg hover:bg-[#b8860b] hover:text-[#1a1814] transition-all"
+            >
+              ← Prev
+            </button>
+            <button
+              onClick={() => setIsPlaying(!isPlaying)}
+              className={`px-4 py-2 rounded-lg transition-all ${isPlaying
+                ? 'bg-[#b8860b] text-[#1a1814]'
+                : 'bg-[#2d2a24] text-[#f5e6c8] hover:bg-[#b8860b] hover:text-[#1a1814]'
+                }`}
+            >
+              {isPlaying ? '⏸ Pause' : '▶ Play'}
+            </button>
+            <button
+              onClick={() => setCurrentStep(prev => (prev + 1) % tutorialSteps.length)}
+              className="px-4 py-2 bg-[#2d2a24] text-[#f5e6c8] rounded-lg hover:bg-[#b8860b] hover:text-[#1a1814] transition-all"
+            >
+              Next →
+            </button>
+          </div>
+        </div>
+
+        {/* Quick Reference Footer */}
+        <div className="p-4 bg-[#0d0d0a] border-t border-[#b8860b]/30">
+          <h4 className="text-sm font-bold text-[#d4a574] mb-2 text-center">Quick Reference</h4>
+          <div className="grid grid-cols-2 gap-4 text-xs">
+            <div className="bg-[#1a1814] p-3 rounded-lg border border-[#2d2a24]">
+              <div className="flex items-center gap-2 mb-1">
+                <img src={getPieceImage('white', 'pawn')} alt="Pawn" className="w-6 h-6" />
+                <span className="text-[#f5e6c8] font-bold">Pawn</span>
+              </div>
+              <p className="text-[#b8860b]/80">Moves: ↑ Straight</p>
+              <p className="text-red-400/80">Captures: ↗↖ Diagonal</p>
+            </div>
+            <div className="bg-[#1a1814] p-3 rounded-lg border border-[#b8860b]/50">
+              <div className="flex items-center gap-2 mb-1">
+                <img src={getPieceImage('white', 'chatur')} alt="Chatur" className="w-6 h-6" />
+                <span className="text-[#f5e6c8] font-bold">Chatur</span>
+              </div>
+              <p className="text-[#b8860b]/80">Moves: ↗↖ Diagonal</p>
+              <p className="text-red-400/80">Captures: ↑ Straight</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+
 export default function App() {
   // Game Configuration
   const [gameMode, setGameMode] = useState<'pvc' | 'pvp' | 'online'>('pvc'); // Player vs Computer, Player vs Player, Online
@@ -35,6 +485,7 @@ export default function App() {
   const [multiplayerError, setMultiplayerError] = useState<string | null>(null);
   const [onlineSubscreen, setOnlineSubscreen] = useState<'menu' | 'create' | 'join'>('menu');
   const [opponentLeft, setOpponentLeft] = useState(false);
+  const [opponentId, setOpponentId] = useState<string | null>(null);
 
   // Game State
   const [gameState, setGameState] = useState<GameState>(() => ({
@@ -89,6 +540,7 @@ export default function App() {
     setPlayerColor(null);
     setWaitingForOpponent(false);
     setOpponentLeft(false);
+    setOpponentId(null);
     playStartSound();
   };
 
@@ -146,12 +598,25 @@ export default function App() {
   };
 
   // Subscribe to online game updates
+  const opponentIdRef = useRef<string | null>(null);
+  opponentIdRef.current = opponentId;
+
   useEffect(() => {
     if (gameMode !== 'online' || !roomId) return;
 
     const unsubscribe = subscribeToGame(
       roomId,
+      opponentIdRef.current,
       (game: GameRoom) => {
+        // Track opponent ID when game updates
+        if (playerColor === 'white' && game.guest_id && !opponentIdRef.current) {
+          setOpponentId(game.guest_id);
+          opponentIdRef.current = game.guest_id;
+        } else if (playerColor === 'black' && game.host_id && !opponentIdRef.current) {
+          setOpponentId(game.host_id);
+          opponentIdRef.current = game.host_id;
+        }
+
         // Check if opponent joined
         if (waitingForOpponent && game.guest_id) {
           setWaitingForOpponent(false);
@@ -186,10 +651,17 @@ export default function App() {
       () => {
         if (!gameState.gameOver) {
           setOpponentLeft(true);
-          // Mark game as won by remaining player
+          // Mark game as won by remaining player - update local state immediately
           if (playerColor) {
+            setGameState(prev => ({
+              ...prev,
+              gameOver: true,
+              winner: playerColor
+            }));
+            // Also update the database
             const opponentColor = playerColor === 'white' ? 'black' : 'white';
             abandonGame(roomId, opponentColor);
+            playVictorySound();
           }
         }
       }
@@ -202,8 +674,17 @@ export default function App() {
   const undoMove = () => {
     if (history.length === 0) return;
 
-    // In PvC mode, undo 2 moves (player + AI) if possible
-    const stepsToUndo = (gameMode === 'pvc' && history.length >= 2) ? 2 : 1;
+    let stepsToUndo = 1;
+
+    if (gameMode === 'pvc') {
+      // If player won, only undo 1 step (to see state before winning move)
+      // Otherwise (AI won or normal play), undo 2 steps (to retry player's turn)
+      if (gameState.gameOver && gameState.winner !== AI_COLOR) {
+        stepsToUndo = 1;
+      } else if (history.length >= 2) {
+        stepsToUndo = 2;
+      }
+    }
 
     // Get the state to restore
     const previousState = history[history.length - stepsToUndo];
@@ -252,7 +733,11 @@ export default function App() {
   // --- Move Handling ---
 
   const handleSquareClick = (row: number, col: number) => {
-    if (gameState.gameOver || gameState.promotionPending) return;
+    if ((gameState.gameOver && !history.length) || gameState.promotionPending) return;
+    // Allow clicking if game over to select pieces (optional) but generally we stop moves. 
+    // Actually standard is stop. But we enabled undo. 
+    if (gameState.gameOver) return;
+
     if (gameMode === 'pvc' && gameState.turn === AI_COLOR) return; // Prevent clicking during AI turn
     if (gameMode === 'online' && gameState.turn !== playerColor) return; // Prevent clicking during opponent's turn
 
@@ -284,6 +769,9 @@ export default function App() {
       validMoves: []
     }));
   };
+  // ... (rest of file) ...
+  // Update the button rendering lower down in the file
+
 
   const executeMove = (fromRow: number, fromCol: number, move: Move) => {
     // Save current state to history before making move
@@ -483,16 +971,16 @@ export default function App() {
         <div className="flex items-center gap-1">
           <button
             onClick={undoMove}
-            disabled={history.length === 0 || gameState.gameOver}
-            className={`w-8 h-8 rounded-full flex items-center justify-center text-sm transition-all ${history.length > 0 && !gameState.gameOver ? 'bg-[#b8860b] text-[#1a1814] hover:bg-[#d4a574]' : 'bg-[#2d2a24] text-[#b8860b]/30 cursor-not-allowed'}`}
+            disabled={history.length === 0}
+            className={`w-8 h-8 rounded-full flex items-center justify-center text-sm transition-all ${history.length > 0 ? 'bg-[#b8860b] text-[#1a1814] hover:bg-[#d4a574]' : 'bg-[#2d2a24] text-[#b8860b]/30 cursor-not-allowed'}`}
             title="Undo"
           >
             ↩
           </button>
           <button
             onClick={redoMove}
-            disabled={future.length === 0 || gameState.gameOver}
-            className={`w-8 h-8 rounded-full flex items-center justify-center text-sm transition-all ${future.length > 0 && !gameState.gameOver ? 'bg-[#b8860b] text-[#1a1814] hover:bg-[#d4a574]' : 'bg-[#2d2a24] text-[#b8860b]/30 cursor-not-allowed'}`}
+            disabled={future.length === 0}
+            className={`w-8 h-8 rounded-full flex items-center justify-center text-sm transition-all ${future.length > 0 ? 'bg-[#b8860b] text-[#1a1814] hover:bg-[#d4a574]' : 'bg-[#2d2a24] text-[#b8860b]/30 cursor-not-allowed'}`}
             title="Redo"
           >
             ↪
@@ -506,22 +994,41 @@ export default function App() {
         </div>
       </div>
 
-      {/* Check Alert */}
-      {gameState.check && !gameState.gameOver && (
-        <div className="bg-red-600/20 border border-red-500/50 text-red-200 px-4 py-1 rounded-lg animate-pulse">
-          ⚠️ Check!
-        </div>
-      )}
-
-      {/* Opponent Left Alert */}
-      {opponentLeft && (
-        <div className="bg-green-600/20 border border-green-500/50 text-green-200 px-4 py-2 rounded-lg">
-          🏆 Opponent disconnected - You win!
-        </div>
-      )}
-
       {/* Board */}
       <div className={`relative ${gameState.gameOver && gameState.winner && gameState.winner !== 'draw' ? 'victory-board' : ''}`}>
+
+
+
+        {/* Opponent Left Alert - Absolute Overlay */}
+        {opponentLeft && (
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-30 bg-green-800/95 border border-green-500 text-green-100 px-6 py-4 rounded-xl shadow-[0_0_20px_rgba(0,0,0,0.6)] text-center backdrop-blur-md">
+            <div className="text-2xl mb-1">🏆</div>
+            <div className="font-bold">Opponent disconnected</div>
+            <div className="text-sm opacity-90">You win!</div>
+          </div>
+        )}
+
+        {/* Game Over Alert - Absolute Overlay (hide if opponent left - show disconnect message instead) */}
+        {gameState.gameOver && !opponentLeft && (
+          <div className={`
+            absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-30
+            px-8 py-4 rounded-xl border-2 shadow-[0_0_30px_rgba(0,0,0,0.7)] flex flex-col items-center animate-bounce-short backdrop-blur-md min-w-[240px]
+            ${gameState.winner === 'draw'
+              ? 'bg-gray-800/95 border-gray-500 text-gray-200'
+              : 'bg-[#1a1814]/95 border-[#b8860b] text-[#f5e6c8]'}
+          `}>
+            <div className="text-2xl font-cinzel font-bold mb-2 text-center">
+              {gameState.winner === 'draw' ? '½ - ½' : '👑 CHECKMATE!'}
+            </div>
+            <div className={`text-sm font-medium ${gameState.winner === 'draw' ? 'text-gray-400' : 'text-[#b8860b]'}`}>
+              {gameState.winner === 'draw'
+                ? 'Game Drawn (Stalemate)'
+                : `${gameState.winner === 'white' ? 'White' : 'Black'} Wins!`}
+            </div>
+          </div>
+        )}
+
+
         {/* Board with background image */}
         <div
           className="w-[min(90vw,540px)] h-[min(90vw,540px)]"
@@ -746,9 +1253,10 @@ export default function App() {
                 {/* Rules Link */}
                 <button
                   onClick={() => { setShowStartScreen(false); setShowRules(true); }}
-                  className="text-[#b8860b]/70 hover:text-[#d4a574] text-sm transition-colors"
+                  className="flex items-center gap-2 px-6 py-3 rounded-xl border border-[#b8860b]/40 text-[#b8860b] hover:bg-[#b8860b] hover:text-[#1a1814] hover:border-[#b8860b] transition-all font-cinzel font-bold text-sm mx-auto"
                 >
-                  📖 View Rules
+                  <span className="text-lg">🎓</span>
+                  Tutorial
                 </button>
               </>
             )}
@@ -756,35 +1264,12 @@ export default function App() {
         </div>
       )}
 
-      {/* Rules Modal */}
+      {/* Interactive Rules/Tutorial Modal */}
       {showRules && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowRules(false)}>
-          <div className="bg-[#161b22] border border-[#30363d] rounded-xl max-w-lg w-full max-h-[80vh] overflow-y-auto p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
-            <div className="flex justify-between items-center mb-4 border-b border-[#30363d] pb-2">
-              <h2 className="text-2xl font-cinzel text-yellow-400">Rules</h2>
-              <button onClick={() => setShowRules(false)} className="text-gray-400 hover:text-white text-2xl">&times;</button>
-            </div>
-
-            <div className="space-y-4 text-gray-300">
-              <section>
-                <h3 className="text-lg font-bold text-orange-400 mb-2">The Chatur Piece</h3>
-                <div className="flex justify-center gap-8 mb-2 bg-[#0d1117] p-4 rounded-lg">
-                  <img src={getPieceImage('white', 'chatur')} alt="White Chatur" className="w-12 h-12 object-contain" />
-                  <img src={getPieceImage('black', 'chatur')} alt="Black Chatur" className="w-12 h-12 object-contain" />
-                </div>
-                <ul className="list-disc pl-5 space-y-1 text-sm">
-                  <li><strong>Movement:</strong> Moves <span className="text-yellow-400">diagonally forward</span> (1 step, or 2 on first move).</li>
-                  <li><strong>Capture:</strong> Captures <span className="text-red-400">straight forward</span> (Inverse of a Pawn).</li>
-                  <li><strong>Position:</strong> Alternates with Pawns on the starting rank (b, d, f, h).</li>
-                </ul>
-              </section>
-              <section>
-                <h3 className="text-lg font-bold text-orange-400 mb-2">Standard Rules</h3>
-                <p className="text-sm">Standard Chess rules apply for all other pieces (King, Queen, Rook, Bishop, Knight, Pawn). Win by Checkmate.</p>
-              </section>
-            </div>
-          </div>
-        </div>
+        <ChaturTutorialModal
+          onClose={() => setShowRules(false)}
+          getPieceImage={getPieceImage}
+        />
       )}
 
       {/* Promotion Modal */}
