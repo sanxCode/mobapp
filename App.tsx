@@ -3,7 +3,9 @@ import { createInitialBoard, getLegalMoves, isKingInCheck, simulateMove, hasAnyL
 import { getBestMove } from './utils/ai';
 import { BOARD_SIZE, PIECE_SYMBOLS } from './utils/constants';
 import { playMoveSound, playCaptureSound, playCheckSound, playVictorySound, playDrawSound, playUndoSound, playRedoSound, playStartSound } from './utils/sounds';
-import { createGameRoom, joinGameRoom, getGameState, updateGameState, subscribeToGame, isPlayerTurn, getPlayerColor, abandonGame, GameRoom } from './utils/multiplayer';
+import { createGameRoom, joinGameRoom, getGameState, updateGameState, subscribeToGame, isPlayerTurn, getPlayerColor, abandonGame, GameRoom, findPublicMatch } from './utils/multiplayer';
+import AuthModal from './AuthModal';
+import { UserProfile, getCurrentUser, logout } from './utils/auth';
 
 // Helper to get base path for assets
 const getBasePath = () => import.meta.env.BASE_URL || '/';
@@ -483,9 +485,41 @@ export default function App() {
   const [waitingForOpponent, setWaitingForOpponent] = useState(false);
   const [joinCodeInput, setJoinCodeInput] = useState('');
   const [multiplayerError, setMultiplayerError] = useState<string | null>(null);
-  const [onlineSubscreen, setOnlineSubscreen] = useState<'menu' | 'create' | 'join'>('menu');
+  const [onlineSubscreen, setOnlineSubscreen] = useState<'menu' | 'invite' | 'join' | 'searching'>('menu');
   const [opponentLeft, setOpponentLeft] = useState(false);
   const [opponentId, setOpponentId] = useState<string | null>(null);
+  const [opponentUsername, setOpponentUsername] = useState<string | null>(null);
+
+  // Auth State
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
+  const [showAuthModal, setShowAuthModal] = useState(true);
+
+  // Check for auth on mount
+  useEffect(() => {
+    const checkAuth = async () => {
+      const user = await getCurrentUser();
+      if (user) {
+        setCurrentUser(user);
+        setShowAuthModal(false);
+      }
+    };
+    checkAuth();
+  }, []);
+
+  // Handle successful auth
+  const handleAuthenticated = (user: UserProfile) => {
+    setCurrentUser(user);
+    setShowAuthModal(false);
+  };
+
+  // Handle logout
+  const handleLogout = async () => {
+    await logout();
+    setCurrentUser(null);
+    setShowAuthModal(true);
+    // Reset to generic state if needed, though most game state reset happens on new game
+    setOnlineSubscreen('menu');
+  };
 
   // Game State
   const [gameState, setGameState] = useState<GameState>(() => ({
@@ -518,7 +552,8 @@ export default function App() {
   };
 
   // Actually reset and start the game
-  const startGame = () => {
+  // Helper to reset board state
+  const resetBoardState = () => {
     setGameState({
       board: createInitialBoard(),
       turn: 'white',
@@ -534,6 +569,14 @@ export default function App() {
     setHistory([]);
     setFuture([]);
     setLastMove(null);
+    setOpponentLeft(false);
+    setOpponentId(null);
+    setOpponentUsername(null);
+  };
+
+  // Actually reset and start the game
+  const startGame = () => {
+    resetBoardState();
     setShowStartScreen(false);
     setRoomId(null);
     setRoomCode('');
@@ -544,18 +587,60 @@ export default function App() {
     playStartSound();
   };
 
-  // Create online game room
-  const handleCreateGame = async () => {
+  // Invite Friend (Private Game)
+  const handleInviteFriend = async () => {
+    if (!currentUser) return;
+    resetBoardState(); // Reset previous game state
     setMultiplayerError(null);
-    const result = await createGameRoom();
+    // Create private game
+    const result = await createGameRoom(currentUser.username, false);
     if (result) {
       setRoomId(result.roomId);
       setRoomCode(result.code);
       setPlayerColor('white');
       setWaitingForOpponent(true);
       setGameMode('online');
+      setOnlineSubscreen('invite'); // Show invite screen
     } else {
       setMultiplayerError('Failed to create game. Please try again.');
+    }
+  };
+
+  // Quick Match (Public Game)
+  const handleQuickMatch = async () => {
+    if (!currentUser) return;
+    resetBoardState(); // Reset previous game state
+    setMultiplayerError(null);
+    setOnlineSubscreen('searching');
+
+    try {
+      const result = await findPublicMatch(currentUser.username);
+
+      if (result) {
+        setRoomId(result.roomId);
+        if (result.code) setRoomCode(result.code);
+        setPlayerColor(result.playerColor);
+
+        // If we created a new public game, we wait
+        if (result.isNew) {
+          setWaitingForOpponent(true);
+        } else {
+          // We joined an existing game
+          setWaitingForOpponent(false);
+          setShowStartScreen(false);
+          // Set opponent username (host) immediately if we joined
+          if (result.hostUsername) setOpponentUsername(result.hostUsername);
+        }
+
+        setGameMode('online');
+      } else {
+        setOnlineSubscreen('menu');
+        setMultiplayerError('Unable to find a match. Please try again.');
+      }
+    } catch (err) {
+      console.error(err);
+      setOnlineSubscreen('menu');
+      setMultiplayerError('Connection error.');
     }
   };
 
@@ -565,8 +650,11 @@ export default function App() {
       setMultiplayerError('Please enter a game code.');
       return;
     }
+    if (!currentUser) return;
+
+    resetBoardState(); // Reset previous game state
     setMultiplayerError(null);
-    const result = await joinGameRoom(joinCodeInput.trim());
+    const result = await joinGameRoom(joinCodeInput.trim(), currentUser.username);
     if ('error' in result) {
       setMultiplayerError(result.error);
     } else {
@@ -575,6 +663,12 @@ export default function App() {
       setGameMode('online');
       setWaitingForOpponent(false);
       setShowStartScreen(false);
+
+      // Set opponent username (host)
+      if (result.hostUsername) {
+        setOpponentUsername(result.hostUsername);
+      }
+
       // Fetch initial game state
       const game = await getGameState(result.roomId);
       if (game) {
@@ -609,19 +703,29 @@ export default function App() {
       opponentIdRef.current,
       (game: GameRoom) => {
         // Track opponent ID when game updates
+        // Track opponent ID and Username when game updates
         if (playerColor === 'white' && game.guest_id && !opponentIdRef.current) {
           setOpponentId(game.guest_id);
           opponentIdRef.current = game.guest_id;
+          if (game.guest_username) setOpponentUsername(game.guest_username);
         } else if (playerColor === 'black' && game.host_id && !opponentIdRef.current) {
           setOpponentId(game.host_id);
           opponentIdRef.current = game.host_id;
+          if (game.host_username) setOpponentUsername(game.host_username);
         }
 
-        // Check if opponent joined
-        if (waitingForOpponent && game.guest_id) {
+        // Check if opponent joined (Game Start)
+        if (game.guest_id && game.host_id) {
+          // Both players are here
           setWaitingForOpponent(false);
-          setShowStartScreen(false);
-          playStartSound();
+          setShowStartScreen(false); // Force close menu
+
+          // Play sound only if no moves yet (clean start)
+          if (!game.last_move) {
+            // Check local ref or state to avoid double playing? 
+            // Ideally we'd track 'gameStarted' locally but this is fine for now
+            // playStartSound(); // Risk of replay on refresh, but acceptable
+          }
         }
 
         // Update game state from server
@@ -937,7 +1041,29 @@ export default function App() {
   );
 
   return (
-    <div className="min-h-screen w-full flex flex-col items-center py-8 gap-6">
+    <div className="min-h-screen w-full flex flex-col items-center py-8 gap-6 relative">
+
+      {/* User Bar (Only when playing) */}
+      {currentUser && !showStartScreen && (
+        <div className="absolute top-4 right-4 z-[60] flex items-center gap-3">
+          <div className="flex flex-col items-end">
+            <span className="text-[#f5e6c8] font-bold text-sm">
+              {currentUser.username} {currentUser.isGuest && <span className="text-[10px] bg-[#b8860b]/30 px-1 rounded ml-1 text-[#b8860b]">GUEST</span>}
+            </span>
+          </div>
+          <button
+            onClick={handleLogout}
+            className="p-2 text-red-400/70 hover:text-red-400 hover:bg-red-400/10 rounded-full transition-all"
+            title={currentUser.isGuest ? 'Login / Sign Up' : 'Logout'}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+              <polyline points="16 17 21 12 16 7"></polyline>
+              <line x1="21" y1="12" x2="9" y2="12"></line>
+            </svg>
+          </button>
+        </div>
+      )}
 
       {/* Header */}
       <header className="text-center space-y-2">
@@ -952,9 +1078,14 @@ export default function App() {
           </p>
           <button
             onClick={openStartScreen}
-            className="text-xs px-3 py-1 bg-[#2d2a24] text-[#b8860b] border border-[#b8860b]/50 rounded-full hover:bg-[#b8860b] hover:text-[#1a1814] transition-all"
+            className="text-xs px-3 py-1 bg-[#2d2a24] text-[#b8860b] border border-[#b8860b]/50 rounded-full hover:bg-[#b8860b] hover:text-[#1a1814] transition-all flex items-center gap-1.5"
           >
-            ↻ New
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="3" y1="12" x2="21" y2="12"></line>
+              <line x1="3" y1="6" x2="21" y2="6"></line>
+              <line x1="3" y1="18" x2="21" y2="18"></line>
+            </svg>
+            Menu
           </button>
         </div>
       </header>
@@ -964,7 +1095,11 @@ export default function App() {
         {/* Black Player */}
         <div className={`flex items-center gap-2 ${gameState.turn === 'black' ? 'opacity-100' : 'opacity-40'}`}>
           <div className={`w-6 h-6 rounded-full border-2 ${gameState.turn === 'black' ? 'border-[#d4a574] shadow-[0_0_10px_rgba(212,165,116,0.5)]' : 'border-[#2d2a24]'} bg-[#1a1814] transition-all`} />
-          <span className="text-sm font-medium text-[#f5e6c8]">Black{gameMode === 'pvc' ? ' (AI)' : ''}</span>
+          <span className="text-sm font-medium text-[#f5e6c8]">
+            {gameMode === 'online'
+              ? (playerColor === 'black' ? (currentUser?.username || 'You') : (opponentUsername || 'Opponent'))
+              : gameMode === 'pvc' ? 'AI' : 'Black'}
+          </span>
         </div>
 
         {/* Undo/Redo Buttons */}
@@ -989,7 +1124,11 @@ export default function App() {
 
         {/* White Player */}
         <div className={`flex items-center gap-2 ${gameState.turn === 'white' ? 'opacity-100' : 'opacity-40'}`}>
-          <span className="text-sm font-medium text-[#f5e6c8]">White</span>
+          <span className="text-sm font-medium text-[#f5e6c8]">
+            {gameMode === 'online'
+              ? (playerColor === 'white' ? (currentUser?.username || 'You') : (opponentUsername || 'Opponent'))
+              : gameMode === 'pvc' ? (currentUser?.username || 'Player') : 'White'}
+          </span>
           <div className={`w-6 h-6 rounded-full border-2 ${gameState.turn === 'white' ? 'border-[#d4a574] shadow-[0_0_10px_rgba(212,165,116,0.5)]' : 'border-[#2d2a24]'} bg-[#f5e6c8] transition-all`} />
         </div>
       </div>
@@ -1023,7 +1162,10 @@ export default function App() {
             <div className={`text-sm font-medium ${gameState.winner === 'draw' ? 'text-gray-400' : 'text-[#b8860b]'}`}>
               {gameState.winner === 'draw'
                 ? 'Game Drawn (Stalemate)'
-                : `${gameState.winner === 'white' ? 'White' : 'Black'} Wins!`}
+                : `${gameState.winner === 'white'
+                  ? (gameMode === 'online' ? (playerColor === 'white' ? (currentUser?.username || 'You') : (opponentUsername || 'Opponent')) : (gameMode === 'pvc' ? (currentUser?.username || 'Player') : 'White'))
+                  : (gameMode === 'online' ? (playerColor === 'black' ? (currentUser?.username || 'You') : (opponentUsername || 'Opponent')) : (gameMode === 'pvc' ? 'AI' : 'Black'))
+                } Wins!`}
             </div>
           </div>
         )}
@@ -1105,27 +1247,66 @@ export default function App() {
       {/* Start Screen Modal */}
       {showStartScreen && (
         <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-[#1a1814] border-2 border-[#b8860b] rounded-2xl max-w-md w-full p-8 shadow-2xl text-center">
+          <div className="bg-[#1a1814] border-2 border-[#b8860b] rounded-2xl max-w-md w-full p-8 shadow-2xl text-center relative">
+            {/* Close Button */}
+            <button
+              onClick={() => setShowStartScreen(false)}
+              className="absolute top-4 right-4 text-[#b8860b]/50 hover:text-[#b8860b] hover:bg-[#b8860b]/10 p-2 rounded-full transition-all"
+              title="Close Menu"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
             {/* Title */}
             <h1 className="text-4xl font-cinzel font-bold title-shimmer mb-2">Chaturanga</h1>
-            <p className="text-[#b8860b]/70 text-sm mb-8">Ancient Chess Reimagined</p>
+            <p className="text-[#b8860b]/70 text-sm mb-6">Ancient Chess Reimagined</p>
+
+            {/* User Profile in Menu */}
+            {currentUser && (
+              <div className="mb-8 bg-[#2d2a24]/50 rounded-xl p-3 border border-[#b8860b]/30 flex flex-col items-center gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-xl">👤</span>
+                  <span className="text-[#f5e6c8] font-bold">{currentUser.username}</span>
+                  {currentUser.isGuest && <span className="text-[10px] bg-[#b8860b]/30 px-1 rounded text-[#b8860b]">GUEST</span>}
+                </div>
+                <button
+                  onClick={handleLogout}
+                  className="text-xs text-[#b8860b]/60 hover:text-red-400 flex items-center gap-1 transition-colors"
+                >
+                  {currentUser.isGuest ? 'Switch Account / Login' : 'Sign Out'}
+                </button>
+              </div>
+            )}
 
             {/* Waiting for opponent screen */}
             {waitingForOpponent ? (
               <div className="space-y-6">
-                <div className="animate-pulse text-[#f5e6c8]">
-                  <p className="text-lg mb-2">Waiting for opponent...</p>
-                  <p className="text-sm text-[#b8860b]/70">Share this code with a friend:</p>
-                </div>
-                <div className="bg-[#2d2a24] p-4 rounded-xl border border-[#b8860b]">
-                  <p className="text-3xl font-mono font-bold text-[#d4a574] tracking-widest">{roomCode}</p>
-                </div>
-                <button
-                  onClick={() => navigator.clipboard.writeText(roomCode)}
-                  className="text-[#b8860b] hover:text-[#d4a574] text-sm"
-                >
-                  📋 Copy Code
-                </button>
+                {onlineSubscreen === 'searching' ? (
+                  // Searching Spinner
+                  <div className="py-8">
+                    <div className="w-12 h-12 border-4 border-[#b8860b] border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                    <p className="text-[#f5e6c8] animate-pulse">Finding checkmate-worthy opponent...</p>
+                  </div>
+                ) : (
+                  // Invite Friend (Code)
+                  <>
+                    <div className="animate-pulse text-[#f5e6c8]">
+                      <p className="text-lg mb-2">Waiting for friend...</p>
+                      <p className="text-sm text-[#b8860b]/70">Share this code:</p>
+                    </div>
+                    <div className="bg-[#2d2a24] p-4 rounded-xl border border-[#b8860b]">
+                      <p className="text-3xl font-mono font-bold text-[#d4a574] tracking-widest select-all">{roomCode}</p>
+                    </div>
+                    <button
+                      onClick={() => navigator.clipboard.writeText(roomCode)}
+                      className="text-[#b8860b] hover:text-[#d4a574] text-sm flex items-center justify-center gap-2 mx-auto"
+                    >
+                      <span>📋</span> Copy Code
+                    </button>
+                  </>
+                )}
                 <button
                   onClick={() => { setWaitingForOpponent(false); setRoomId(null); setOnlineSubscreen('menu'); }}
                   className="block mx-auto text-red-400/70 hover:text-red-400 text-sm mt-4"
@@ -1133,49 +1314,76 @@ export default function App() {
                   ✕ Cancel
                 </button>
               </div>
-            ) : onlineSubscreen !== 'menu' && gameMode === 'online' ? (
-              /* Online Create/Join screens */
-              <div className="space-y-6">
-                {onlineSubscreen === 'create' && (
-                  <>
-                    <p className="text-[#f5e6c8]">Create a new game and share the code</p>
+            ) : gameMode === 'online' ? (
+              // ONLINE MENU & SUBSCREENS
+              onlineSubscreen === 'join' ? (
+                // JOIN SCREEN
+                <div className="space-y-6">
+                  <p className="text-[#f5e6c8]">Enter the code shared by your friend</p>
+                  <input
+                    type="text"
+                    maxLength={6}
+                    value={joinCodeInput}
+                    onChange={(e) => setJoinCodeInput(e.target.value.toUpperCase())}
+                    placeholder="ABC123"
+                    className="w-full bg-[#2d2a24] border border-[#b8860b]/50 rounded-lg py-3 px-4 text-center text-xl tracking-widest font-mono text-[#f5e6c8] focus:border-[#b8860b] focus:outline-none placeholder-[#b8860b]/20"
+                  />
+                  <button
+                    onClick={handleJoinGame}
+                    className="w-full py-3 bg-[#b8860b] text-[#1a1814] rounded-lg font-bold hover:bg-[#d4a574] transition-all"
+                  >
+                    Join Game
+                  </button>
+                  {multiplayerError && <p className="text-red-400 text-sm">{multiplayerError}</p>}
+                  <button
+                    onClick={() => setOnlineSubscreen('menu')}
+                    className="text-[#b8860b]/70 hover:text-[#d4a574] text-sm"
+                  >
+                    ← Back
+                  </button>
+                </div>
+              ) : (
+                // ONLINE MAIN MENU
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 gap-4">
                     <button
-                      onClick={handleCreateGame}
-                      className="w-full py-4 bg-gradient-to-r from-[#b8860b] to-[#d4a574] text-[#1a1814] rounded-xl font-bold text-lg hover:scale-[1.02] transition-all shadow-lg"
+                      onClick={handleQuickMatch}
+                      className="flex items-center justify-center gap-3 p-4 bg-gradient-to-r from-[#b8860b] to-[#d4a574] text-[#1a1814] rounded-xl font-bold text-lg hover:scale-[1.02] transition-all shadow-lg"
                     >
-                      🎲 Create Game
+                      <span className="text-2xl">⚔️</span>
+                      <div className="text-left">
+                        <div className="leading-none">Quick Match</div>
+                        <div className="text-xs opacity-70 font-normal mt-1">Play random opponent</div>
+                      </div>
                     </button>
-                  </>
-                )}
-                {onlineSubscreen === 'join' && (
-                  <>
-                    <p className="text-[#f5e6c8]">Enter the game code from your friend</p>
-                    <input
-                      type="text"
-                      value={joinCodeInput}
-                      onChange={(e) => setJoinCodeInput(e.target.value.toUpperCase())}
-                      placeholder="XXXXXX"
-                      className="w-full p-4 bg-[#2d2a24] border border-[#b8860b]/50 rounded-xl text-center text-2xl font-mono text-[#f5e6c8] tracking-widest placeholder-[#b8860b]/30 focus:border-[#b8860b] focus:outline-none"
-                      maxLength={6}
-                    />
-                    {multiplayerError && (
-                      <p className="text-red-400 text-sm">{multiplayerError}</p>
-                    )}
-                    <button
-                      onClick={handleJoinGame}
-                      className="w-full py-4 bg-gradient-to-r from-[#b8860b] to-[#d4a574] text-[#1a1814] rounded-xl font-bold text-lg hover:scale-[1.02] transition-all shadow-lg"
-                    >
-                      🎮 Join Game
-                    </button>
-                  </>
-                )}
-                <button
-                  onClick={() => setOnlineSubscreen('menu')}
-                  className="text-[#b8860b]/70 hover:text-[#d4a574] text-sm"
-                >
-                  ← Back
-                </button>
-              </div>
+
+                    <div className="flex gap-4">
+                      <button
+                        onClick={handleInviteFriend}
+                        className="flex-1 p-3 bg-[#2d2a24] border border-[#b8860b]/30 rounded-xl text-[#f5e6c8] hover:border-[#b8860b] hover:bg-[#b8860b]/10 transition-all group"
+                      >
+                        <div className="text-2xl mb-1 group-hover:scale-110 transition-transform">📩</div>
+                        <div className="text-sm font-semibold">Invite Friend</div>
+                      </button>
+
+                      <button
+                        onClick={() => setOnlineSubscreen('join')}
+                        className="flex-1 p-3 bg-[#2d2a24] border border-[#b8860b]/30 rounded-xl text-[#f5e6c8] hover:border-[#b8860b] hover:bg-[#b8860b]/10 transition-all group"
+                      >
+                        <div className="text-2xl mb-1 group-hover:scale-110 transition-transform">🔢</div>
+                        <div className="text-sm font-semibold">Join Code</div>
+                      </button>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => setGameMode('pvc')} // Go back to main mode select
+                    className="w-full py-3 mt-4 border border-[#b8860b]/30 rounded-lg text-[#b8860b] hover:bg-[#b8860b]/10 hover:border-[#b8860b] transition-all flex items-center justify-center gap-2 text-sm font-semibold"
+                  >
+                    <span>←</span> Back to Main Menu
+                  </button>
+                </div>
+              )
             ) : (
               /* Main menu */
               <>
@@ -1297,6 +1505,16 @@ export default function App() {
       <footer className="mt-6 text-center text-xs text-[#b8860b]/50">
         Created by Jiv Dost Mahan • Designed and Developed by Sunny Vaghela
       </footer>
-    </div>
+
+
+      {/* Auth Modal */}
+      {
+        showAuthModal && (
+          <AuthModal
+            onAuthenticated={handleAuthenticated}
+          />
+        )
+      }
+    </div >
   );
 }

@@ -8,6 +8,8 @@ export interface GameRoom {
     code: string;
     host_id: string;
     guest_id: string | null;
+    host_username: string | null;
+    guest_username: string | null;
     board_state: BoardState;
     current_turn: Color;
     captured_white: PieceType[];
@@ -17,6 +19,7 @@ export interface GameRoom {
     in_check: boolean;
     status: 'waiting' | 'playing' | 'finished';
     last_move: { from: { row: number; col: number }; to: { row: number; col: number } } | null;
+    is_public: boolean;
     created_at: string;
 }
 
@@ -41,7 +44,7 @@ export const getPlayerId = (): string => {
 };
 
 // Create a new game room
-export const createGameRoom = async (): Promise<{ code: string; roomId: string } | null> => {
+export const createGameRoom = async (username: string, isPublic: boolean = false): Promise<{ code: string; roomId: string } | null> => {
     const playerId = getPlayerId();
     const code = generateGameCode();
     const initialBoard = createInitialBoard();
@@ -52,6 +55,8 @@ export const createGameRoom = async (): Promise<{ code: string; roomId: string }
             code: code,
             host_id: playerId,
             guest_id: null,
+            host_username: username,
+            guest_username: null,
             board_state: initialBoard,
             current_turn: 'white',
             captured_white: [],
@@ -60,7 +65,8 @@ export const createGameRoom = async (): Promise<{ code: string; roomId: string }
             winner: null,
             in_check: false,
             status: 'waiting',
-            last_move: null
+            last_move: null,
+            is_public: isPublic
         })
         .select()
         .single();
@@ -74,7 +80,7 @@ export const createGameRoom = async (): Promise<{ code: string; roomId: string }
 };
 
 // Join an existing game room
-export const joinGameRoom = async (code: string): Promise<{ roomId: string; playerColor: Color } | { error: string }> => {
+export const joinGameRoom = async (code: string, username: string): Promise<{ roomId: string; playerColor: Color; hostUsername: string | null } | { error: string }> => {
     const playerId = getPlayerId();
 
     // Find the game
@@ -90,11 +96,11 @@ export const joinGameRoom = async (code: string): Promise<{ roomId: string; play
 
     // Check if player is already in the game
     if (game.host_id === playerId) {
-        return { roomId: game.id, playerColor: 'white' };
+        return { roomId: game.id, playerColor: 'white', hostUsername: game.host_username };
     }
 
     if (game.guest_id === playerId) {
-        return { roomId: game.id, playerColor: 'black' };
+        return { roomId: game.id, playerColor: 'black', hostUsername: game.host_username };
     }
 
     // Check if game has room
@@ -105,7 +111,7 @@ export const joinGameRoom = async (code: string): Promise<{ roomId: string; play
     // Join as guest
     const { error: updateError } = await supabase
         .from('games')
-        .update({ guest_id: playerId, status: 'playing' })
+        .update({ guest_id: playerId, guest_username: username, status: 'playing' })
         .eq('id', game.id);
 
     if (updateError) {
@@ -113,7 +119,49 @@ export const joinGameRoom = async (code: string): Promise<{ roomId: string; play
         return { error: 'Failed to join game. Please try again.' };
     }
 
-    return { roomId: game.id, playerColor: 'black' };
+    return { roomId: game.id, playerColor: 'black', hostUsername: game.host_username };
+};
+
+// Find a public match or create one
+export const findPublicMatch = async (username: string): Promise<{ roomId: string; playerColor: Color; hostUsername: string | null; isNew?: boolean; code?: string } | null> => {
+    const playerId = getPlayerId();
+
+    // 1. Try to find a public game waiting for players
+    const { data: availableGames } = await supabase
+        .from('games')
+        .select('*')
+        .eq('status', 'waiting')
+        .eq('is_public', true)
+        .is('guest_id', null)
+        .neq('host_id', playerId) // Don't join your own game
+        .limit(1);
+
+    if (availableGames && availableGames.length > 0) {
+        // Found a game! Join it.
+        const game = availableGames[0];
+        const joinResult = await joinGameRoom(game.code, username);
+
+        if ('error' in joinResult) {
+            console.error('Error joining public game:', joinResult.error);
+            return null;
+        }
+
+        return joinResult;
+    }
+
+    // 2. No game found, create a new public game
+    const newGame = await createGameRoom(username, true);
+    if (newGame) {
+        return {
+            roomId: newGame.roomId,
+            code: newGame.code,
+            playerColor: 'white',
+            hostUsername: null,
+            isNew: true
+        };
+    }
+
+    return null;
 };
 
 // Get game state
