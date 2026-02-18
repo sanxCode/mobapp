@@ -29,6 +29,8 @@ interface StartScreenProps {
     onJoinGame: () => void;
     onStartGame: () => void;
     onShowTutorial: () => void;
+    onRefreshStatus?: () => void;
+    onCancelMatchmaking?: () => void;
     // AI
     aiDifficulty: number;
     setAiDifficulty: (diff: number) => void;
@@ -56,6 +58,8 @@ const StartScreen: React.FC<StartScreenProps> = ({
     onJoinGame,
     onStartGame,
     onShowTutorial,
+    onRefreshStatus,
+    onCancelMatchmaking,
     aiDifficulty,
     setAiDifficulty,
 }) => {
@@ -124,12 +128,27 @@ const StartScreen: React.FC<StartScreenProps> = ({
                                 </button>
                             </>
                         )}
-                        <button
-                            onClick={() => { setWaitingForOpponent(false); setRoomId(null); setOnlineSubscreen('menu'); }}
-                            className="block mx-auto text-red-400/70 hover:text-red-400 text-sm mt-4"
-                        >
-                            ✕ Cancel
-                        </button>
+                        <div className="flex gap-3 justify-center mt-4">
+                            {onRefreshStatus && (
+                                <button
+                                    onClick={onRefreshStatus}
+                                    className="px-4 py-2 bg-[#b8860b]/20 text-[#b8860b] hover:bg-[#b8860b]/40 rounded-lg text-sm border border-[#b8860b]/30"
+                                >
+                                    ↻ Status
+                                </button>
+                            )}
+                            <button
+                                onClick={() => {
+                                    if (onCancelMatchmaking) onCancelMatchmaking();
+                                    setWaitingForOpponent(false);
+                                    setRoomId(null);
+                                    setOnlineSubscreen('menu');
+                                }}
+                                className="px-4 py-2 text-red-400/70 hover:text-red-400 text-sm"
+                            >
+                                ✕ Cancel
+                            </button>
+                        </div>
                     </div>
                 ) : gameMode === 'online' ? (
                     // ONLINE MENU & SUBSCREENS

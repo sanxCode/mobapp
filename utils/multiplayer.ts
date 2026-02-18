@@ -122,11 +122,35 @@ export const joinGameRoom = async (code: string, username: string): Promise<{ ro
     return { roomId: game.id, playerColor: 'black', hostUsername: game.host_username };
 };
 
+// Clean up stale public games (older than 10 min, still waiting)
+const cleanupStaleGames = async () => {
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    await supabase
+        .from('games')
+        .update({ status: 'finished', game_over: true, winner: 'draw' })
+        .eq('status', 'waiting')
+        .eq('is_public', true)
+        .is('guest_id', null)
+        .lt('created_at', tenMinutesAgo);
+};
+
+// Cancel a public game (when user cancels matchmaking)
+export const cancelPublicGame = async (roomId: string): Promise<void> => {
+    await supabase
+        .from('games')
+        .update({ status: 'finished', game_over: true, winner: 'draw' })
+        .eq('id', roomId);
+};
+
 // Find a public match or create one
 export const findPublicMatch = async (username: string): Promise<{ roomId: string; playerColor: Color; hostUsername: string | null; isNew?: boolean; code?: string } | null> => {
     const playerId = getPlayerId();
 
-    // 1. Try to find a public game waiting for players
+    // 0. Clean up stale games first
+    await cleanupStaleGames();
+
+    // 1. Try to find a public game waiting for players (recent only, newest first)
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
     const { data: availableGames } = await supabase
         .from('games')
         .select('*')
@@ -134,6 +158,8 @@ export const findPublicMatch = async (username: string): Promise<{ roomId: strin
         .eq('is_public', true)
         .is('guest_id', null)
         .neq('host_id', playerId) // Don't join your own game
+        .gte('created_at', fiveMinutesAgo) // Only recent games
+        .order('created_at', { ascending: false }) // Newest first
         .limit(1);
 
     if (availableGames && availableGames.length > 0) {

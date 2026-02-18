@@ -3,7 +3,7 @@ import { createInitialBoard, getLegalMoves, isKingInCheck, simulateMove, hasAnyL
 import { getBestMove } from './utils/ai';
 import { BOARD_SIZE, PIECE_SYMBOLS } from './utils/constants';
 import { playMoveSound, playCaptureSound, playCheckSound, playVictorySound, playDrawSound, playUndoSound, playRedoSound, playStartSound } from './utils/sounds';
-import { createGameRoom, joinGameRoom, getGameState, updateGameState, subscribeToGame, isPlayerTurn, getPlayerColor, abandonGame, GameRoom, findPublicMatch } from './utils/multiplayer';
+import { createGameRoom, joinGameRoom, getGameState, updateGameState, subscribeToGame, isPlayerTurn, getPlayerColor, abandonGame, cancelPublicGame, GameRoom, findPublicMatch } from './utils/multiplayer';
 import StartScreen, { GameMode, OnlineSubscreen } from './components/StartScreen';
 import AuthModal from './AuthModal';
 import { UserProfile, getCurrentUser, logout } from './utils/auth';
@@ -696,62 +696,74 @@ export default function App() {
   const opponentIdRef = useRef<string | null>(null);
   opponentIdRef.current = opponentId;
 
+  // Track last processed game state to prevent redundant updates from polling
+  const lastProcessedRef = useRef<{ turn: string; gameOver: boolean; guestId: string | null }>({ turn: 'white', gameOver: false, guestId: null });
+
+  const handleGameUpdate = useCallback((game: GameRoom) => {
+    const lastState = lastProcessedRef.current;
+    const hasChanged = (
+      game.current_turn !== lastState.turn ||
+      game.game_over !== lastState.gameOver ||
+      game.guest_id !== lastState.guestId
+    );
+
+    // Skip if nothing changed (polling dedup)
+    if (!hasChanged) return;
+
+    // Update tracking ref
+    lastProcessedRef.current = { turn: game.current_turn, gameOver: game.game_over, guestId: game.guest_id };
+    console.log('Game Update Applied:', game.current_turn, 'gameOver:', game.game_over);
+
+    // Track opponent ID when game updates
+    if (playerColor === 'white' && game.guest_id && !opponentIdRef.current) {
+      setOpponentId(game.guest_id);
+      opponentIdRef.current = game.guest_id;
+      if (game.guest_username) setOpponentUsername(game.guest_username);
+    } else if (playerColor === 'black' && game.host_id && !opponentIdRef.current) {
+      setOpponentId(game.host_id);
+      opponentIdRef.current = game.host_id;
+      if (game.host_username) setOpponentUsername(game.host_username);
+    }
+
+    // Check if opponent joined (Game Start)
+    if (game.guest_id && game.host_id) {
+      // Both players are here
+      setWaitingForOpponent(false);
+      setShowStartScreen(false); // Force close menu
+    }
+
+    // Update game state from server
+    setGameState({
+      board: game.board_state,
+      turn: game.current_turn,
+      selectedSquare: null,
+      validMoves: [],
+      gameOver: game.game_over,
+      winner: game.winner,
+      check: game.in_check,
+      capturedWhite: game.captured_white,
+      capturedBlack: game.captured_black,
+      promotionPending: null
+    });
+    setLastMove(game.last_move);
+
+    // Play sounds
+    if (game.game_over) {
+      if (game.winner === 'draw') playDrawSound();
+      else playVictorySound();
+    } else if (game.in_check) {
+      playCheckSound();
+    }
+  }, [playerColor]);
+
   useEffect(() => {
     if (gameMode !== 'online' || !roomId) return;
+
 
     const unsubscribe = subscribeToGame(
       roomId,
       opponentIdRef.current,
-      (game: GameRoom) => {
-        // Track opponent ID when game updates
-        // Track opponent ID and Username when game updates
-        if (playerColor === 'white' && game.guest_id && !opponentIdRef.current) {
-          setOpponentId(game.guest_id);
-          opponentIdRef.current = game.guest_id;
-          if (game.guest_username) setOpponentUsername(game.guest_username);
-        } else if (playerColor === 'black' && game.host_id && !opponentIdRef.current) {
-          setOpponentId(game.host_id);
-          opponentIdRef.current = game.host_id;
-          if (game.host_username) setOpponentUsername(game.host_username);
-        }
-
-        // Check if opponent joined (Game Start)
-        if (game.guest_id && game.host_id) {
-          // Both players are here
-          setWaitingForOpponent(false);
-          setShowStartScreen(false); // Force close menu
-
-          // Play sound only if no moves yet (clean start)
-          if (!game.last_move) {
-            // Check local ref or state to avoid double playing? 
-            // Ideally we'd track 'gameStarted' locally but this is fine for now
-            // playStartSound(); // Risk of replay on refresh, but acceptable
-          }
-        }
-
-        // Update game state from server
-        setGameState({
-          board: game.board_state,
-          turn: game.current_turn,
-          selectedSquare: null,
-          validMoves: [],
-          gameOver: game.game_over,
-          winner: game.winner,
-          check: game.in_check,
-          capturedWhite: game.captured_white,
-          capturedBlack: game.captured_black,
-          promotionPending: null
-        });
-        setLastMove(game.last_move);
-
-        // Play sounds
-        if (game.game_over) {
-          if (game.winner === 'draw') playDrawSound();
-          else playVictorySound();
-        } else if (game.in_check) {
-          playCheckSound();
-        }
-      },
+      handleGameUpdate,
       // Opponent left callback
       () => {
         if (!gameState.gameOver) {
@@ -772,8 +784,23 @@ export default function App() {
       }
     );
 
-    return () => unsubscribe();
-  }, [gameMode, roomId, waitingForOpponent, gameState.gameOver, playerColor]);
+    // Initial Fetch to catch up
+    getGameState(roomId).then((game) => {
+      if (game) handleGameUpdate(game);
+    });
+
+    // Polling fallback (2s) to guarantee sync
+    const interval = setInterval(() => {
+      getGameState(roomId).then((game) => {
+        if (game) handleGameUpdate(game);
+      });
+    }, 2000);
+
+    return () => {
+      clearInterval(interval);
+      unsubscribe();
+    };
+  }, [gameMode, roomId, gameState.gameOver, playerColor]);
 
   // Undo last move (in AI mode, undo 2 moves to skip AI's turn)
   const undoMove = () => {
@@ -1247,6 +1274,7 @@ export default function App() {
 
       {/* Start Screen Component */}
       <StartScreen
+        onRefreshStatus={() => roomId && getGameState(roomId).then(g => g && handleGameUpdate(g))}
         currentUser={currentUser}
         showStartScreen={showStartScreen}
         onClose={() => setShowStartScreen(false)}
@@ -1268,6 +1296,7 @@ export default function App() {
         onJoinGame={handleJoinGame}
         onStartGame={startGame}
         onShowTutorial={() => { setShowStartScreen(false); setShowRules(true); }}
+        onCancelMatchmaking={() => { if (roomId) cancelPublicGame(roomId); }}
         aiDifficulty={aiDifficulty}
         setAiDifficulty={setAiDifficulty}
       />
